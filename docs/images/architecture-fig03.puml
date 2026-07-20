@@ -6,7 +6,7 @@ autonumber
 
 actor 玩家
 participant 浏览器
-participant "WebSocket 网关" as Gateway
+participant "房间连接网关" as Gateway
 participant "房间串行队列" as Queue
 participant "Game Host / 插件" as Host
 participant "Deadline Scheduler" as Scheduler

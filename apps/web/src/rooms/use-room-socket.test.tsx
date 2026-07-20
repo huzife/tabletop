@@ -1,7 +1,7 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { seatIdSchema } from "@tabletop/protocol";
 import type { ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useRoomSocket, type UseRoomSocketResult } from "./use-room-socket";
 
@@ -56,6 +56,7 @@ function Harness({ children }: { readonly children?: ReactNode }) {
 }
 
 describe("useRoomSocket", () => {
+  const NativeFetch = globalThis.fetch;
   const NativeWebSocket = globalThis.WebSocket;
 
   beforeEach(() => {
@@ -69,6 +70,12 @@ describe("useRoomSocket", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: NativeFetch,
+      writable: true,
+    });
     Object.defineProperty(globalThis, "WebSocket", {
       configurable: true,
       value: NativeWebSocket,
@@ -136,7 +143,127 @@ describe("useRoomSocket", () => {
     expect(latest?.snapshot?.revision).toBe(3);
     view.unmount();
   });
+
+  it("falls back to HTTP long polling when the initial WebSocket handshake fails", async () => {
+    const { commands } = installLongPollingFetch();
+
+    const view = render(<Harness />);
+    const first = FakeWebSocket.instances[0];
+    act(() => first?.close(1006, "handshake failed"));
+
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      payload: { joinTicket: JOIN_TICKET },
+      protocol: 1,
+      type: "room.join",
+    });
+
+    act(() => {
+      latest?.sendCommand({
+        expectedRevision: 1,
+        payload: { seatId: seatIdSchema.parse("seat-1") },
+        type: "room.seat.claim",
+      });
+    });
+    await waitFor(() => expect(commands).toHaveLength(2));
+    expect(commands[1]).toMatchObject({ type: "room.seat.claim" });
+    view.unmount();
+  });
+
+  it("uses HTTP long polling when the browser has no WebSocket implementation", async () => {
+    const { commands } = installLongPollingFetch();
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: undefined,
+      writable: true,
+    });
+
+    const view = render(<Harness />);
+
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+    expect(commands[0]).toMatchObject({
+      payload: { joinTicket: JOIN_TICKET },
+      protocol: 1,
+      type: "room.join",
+    });
+    view.unmount();
+  });
+
+  it("abandons a WebSocket that never produces a room snapshot", async () => {
+    const { commands } = installLongPollingFetch();
+    vi.useFakeTimers();
+    const view = render(<Harness />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(1);
+    });
+
+    expect(latest?.connectionStatus).toBe("connected");
+    expect(commands[0]).toMatchObject({ type: "room.join" });
+    view.unmount();
+  });
 });
+
+function installLongPollingFetch() {
+  const commands: unknown[] = [];
+  let pollCount = 0;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), window.location.origin);
+    if (url.pathname === "/api/v1/room-connections" && init?.method === "POST") {
+      return jsonResponse(
+        {
+          connectionId: "connection-polling",
+          messages: [
+            {
+              ...connectionReadyMessage(),
+              payload: {
+                ...connectionReadyMessage().payload,
+                connectionId: "connection-polling",
+              },
+            },
+          ],
+        },
+        201,
+      );
+    }
+    if (url.pathname.endsWith("/commands") && init?.method === "POST") {
+      commands.push(JSON.parse(String(init.body)) as unknown);
+      return jsonResponse({ accepted: true }, 202);
+    }
+    if (url.pathname.endsWith("/poll") && init?.method === "POST") {
+      pollCount += 1;
+      if (pollCount === 1) {
+        return jsonResponse({ messages: [roomSnapshotMessage()] });
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener(
+          "abort",
+          () => reject(new DOMException("Aborted", "AbortError")),
+          { once: true },
+        );
+      });
+    }
+    if (url.pathname.startsWith("/api/v1/room-connections/") && init?.method === "DELETE") {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url.pathname}`);
+  });
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: fetchMock,
+    writable: true,
+  });
+  return { commands, fetchMock };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    headers: { "content-type": "application/json" },
+    status,
+  });
+}
 
 function readSentCommands(socket: FakeWebSocket | undefined): unknown[] {
   return (socket?.sent ?? []).map((message) => JSON.parse(message) as unknown);

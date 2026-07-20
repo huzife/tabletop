@@ -119,7 +119,7 @@ interface GameSettingsContractV1<TSettings> {
 
 ## 5. 服务端插件合同
 
-服务端插件把任意合法动作转换成新的不可变状态。权威接口位于 `packages/game-sdk/src/server/module.ts`；下面省略泛型约束，仅展示当前结构。接口刻意不暴露 WebSocket、数据库或房间可变对象。
+服务端插件把任意合法动作转换成新的不可变状态。权威接口位于 `packages/game-sdk/src/server/module.ts`；下面省略泛型约束，仅展示当前结构。接口刻意不暴露 WebSocket、长轮询、数据库或房间可变对象。
 
 ```ts
 interface GameServerModuleV1<TSettings, TState, TAction, TView, TDisplayEvent> {
@@ -338,7 +338,7 @@ interface GameWebModuleV1<TSettings, TAction, TView, TDisplayEvent> {
 }
 ```
 
-`GameView` 接收最新完整投影视图、尚未播放的展示事件、发送动作函数和只读连接状态。它不能访问原始 WebSocket，也不能修改公共房间 store。这样平台可以统一处理请求 ID、修订号、错误提示和重连。
+`GameView` 接收最新完整投影视图、尚未播放的展示事件、发送动作函数和只读连接状态。它不能访问原始 WebSocket 或长轮询，也不能修改公共房间 store。这样平台可以统一处理请求 ID、修订号、错误提示和重连。
 
 插件可以用 DOM、CSS、Canvas 或 SVG 实现游戏操作面。首期二维界面优先使用 DOM/CSS 或 Canvas，不引入 3D。固定格式区域必须有稳定尺寸约束，动画元素不得撑开布局。
 

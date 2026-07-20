@@ -3,7 +3,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { serverMessageSchema, type ServerMessage } from "@tabletop/protocol";
+import {
+  roomConnectionOpenResponseSchema,
+  roomConnectionPollResponseSchema,
+  serverMessageSchema,
+  type ServerMessage,
+} from "@tabletop/protocol";
 import { ulid } from "ulid";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
@@ -190,13 +195,166 @@ function send(socket: WebSocket, command: object): void {
   socket.send(JSON.stringify(command));
 }
 
-describe("RoomWebSocketGateway", () => {
+describe("RoomConnectionGateway", () => {
   const cleanups: Array<() => Promise<void> | void> = [];
 
   afterEach(async () => {
     for (const cleanup of cleanups.splice(0).reverse()) {
       await cleanup();
     }
+  });
+
+  it("joins and runs revisioned commands through the HTTP long-polling fallback", async () => {
+    const { origin, runtime } = await startTestRuntime(cleanups);
+    runtime.repositories.accounts.create({
+      passwordHash: await new PasswordService(1).hash("polling-password"),
+      username: "长轮询用户",
+    });
+    const cookies = await login(runtime, "长轮询用户", "polling-password");
+    const headers = unsafeHeaders(cookies, origin);
+    const createdResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: {
+        gameId: "gomoku",
+        name: "长轮询测试房",
+        practice: false,
+        settings: {
+          moveTimeSeconds: 60,
+          rule: "freestyle",
+          timerEnabled: false,
+          totalTimeMinutes: 10,
+        },
+      },
+      url: "/api/v1/rooms",
+    });
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json() as { joinTicket: string; roomId: string };
+
+    const openedResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: { protocol: 1 },
+      url: "/api/v1/room-connections",
+    });
+    expect(openedResponse.statusCode).toBe(201);
+    expect(openedResponse.headers["cache-control"]).toBe("no-store");
+    expect(openedResponse.headers["x-accel-buffering"]).toBe("no");
+    const opened = roomConnectionOpenResponseSchema.parse(openedResponse.json());
+    expect(opened.messages).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({ connectionId: opened.connectionId }),
+        type: "connection.ready",
+      }),
+    ]);
+
+    const joinRequestId = ulid();
+    const joinedResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: {
+        payload: { joinTicket: created.joinTicket },
+        protocol: 1,
+        requestId: joinRequestId,
+        type: "room.join",
+      },
+      url: `/api/v1/room-connections/${opened.connectionId}/commands`,
+    });
+    expect(joinedResponse.statusCode).toBe(202);
+    const joinedPoll = roomConnectionPollResponseSchema.parse(
+      (
+        await runtime.app.inject({
+          headers,
+          method: "POST",
+          payload: {},
+          url: `/api/v1/room-connections/${opened.connectionId}/poll`,
+        })
+      ).json(),
+    );
+    const joinedSnapshot = joinedPoll.messages.find(
+      (message) => message.type === "room.snapshot" && message.roomId === created.roomId,
+    );
+    expect(joinedSnapshot).toMatchObject({ type: "room.snapshot" });
+    expect(joinedPoll.messages).toContainEqual(
+      expect.objectContaining({ causedBy: joinRequestId, type: "command.ack" }),
+    );
+    if (joinedSnapshot?.type !== "room.snapshot") throw new Error("长轮询未返回房间快照");
+
+    const claimRequestId = ulid();
+    const claimedResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: {
+        expectedRevision: joinedSnapshot.revision,
+        payload: { seatId: "seat-1" },
+        protocol: 1,
+        requestId: claimRequestId,
+        roomId: created.roomId,
+        type: "room.seat.claim",
+      },
+      url: `/api/v1/room-connections/${opened.connectionId}/commands`,
+    });
+    expect(claimedResponse.statusCode).toBe(202);
+    const claimedPoll = roomConnectionPollResponseSchema.parse(
+      (
+        await runtime.app.inject({
+          headers,
+          method: "POST",
+          payload: {},
+          url: `/api/v1/room-connections/${opened.connectionId}/poll`,
+        })
+      ).json(),
+    );
+    expect(claimedPoll.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          revision: joinedSnapshot.revision + 1,
+          type: "room.snapshot",
+        }),
+        expect.objectContaining({ causedBy: claimRequestId, type: "command.ack" }),
+      ]),
+    );
+
+    const closedResponse = await runtime.app.inject({
+      headers,
+      method: "DELETE",
+      url: `/api/v1/room-connections/${opened.connectionId}`,
+    });
+    expect(closedResponse.statusCode).toBe(204);
+  });
+
+  it("requires a session, same-origin request and CSRF token for long polling", async () => {
+    const { origin, runtime } = await startTestRuntime(cleanups);
+    const anonymous = await runtime.app.inject({
+      method: "POST",
+      payload: { protocol: 1 },
+      url: "/api/v1/room-connections",
+    });
+    expect(anonymous.statusCode).toBe(401);
+    expect(anonymous.json()).toMatchObject({ error: { code: "AUTH_SESSION_EXPIRED" } });
+
+    runtime.repositories.accounts.create({
+      passwordHash: await new PasswordService(1).hash("polling-auth-password"),
+      username: "轮询鉴权用户",
+    });
+    const cookies = await login(runtime, "轮询鉴权用户", "polling-auth-password");
+    const withoutOrigin = await runtime.app.inject({
+      headers: { cookie: cookies.header },
+      method: "POST",
+      payload: { protocol: 1 },
+      url: "/api/v1/room-connections",
+    });
+    expect(withoutOrigin.statusCode).toBe(403);
+    expect(withoutOrigin.json()).toMatchObject({ error: { code: "AUTH_ORIGIN_INVALID" } });
+
+    const withoutCsrf = await runtime.app.inject({
+      headers: { cookie: cookies.header, host: new URL(origin).host, origin },
+      method: "POST",
+      payload: { protocol: 1 },
+      url: "/api/v1/room-connections",
+    });
+    expect(withoutCsrf.statusCode).toBe(403);
+    expect(withoutCsrf.json()).toMatchObject({ error: { code: "AUTH_CSRF_INVALID" } });
   });
 
   it("uses a safe correlation ID when a raw request ID is invalid", async () => {

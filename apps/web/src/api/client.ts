@@ -12,6 +12,9 @@ import {
   joinTicketResponseSchema,
   loginRequestSchema,
   resetPasswordRequestSchema,
+  roomConnectionCommandResponseSchema,
+  roomConnectionOpenResponseSchema,
+  roomConnectionPollResponseSchema,
   roomsResponseSchema,
   sessionResponseSchema,
   updateAccountRequestSchema,
@@ -25,9 +28,16 @@ import {
   type CreateRoomRequest,
   type GamesResponse,
   type RoomsResponse,
+  type RoomConnectionOpenResponse,
+  type RoomConnectionPollResponse,
   type SessionResponse,
 } from "@tabletop/protocol/http";
-import { apiErrorResponseSchema } from "@tabletop/protocol";
+import {
+  apiErrorResponseSchema,
+  clientCommandSchema,
+  type ClientCommand,
+  type ConnectionId,
+} from "@tabletop/protocol";
 import type { z } from "zod";
 
 const API_PREFIX = "/api/v1";
@@ -207,6 +217,37 @@ export const lobbyApi = {
     filters: { gameId?: string; joinable?: boolean; status?: string } = {},
   ): Promise<RoomsResponse> {
     return request(`/rooms${queryString(filters)}`, roomsResponseSchema);
+  },
+};
+
+export const roomConnectionApi = {
+  close(connectionId: ConnectionId, keepalive = false) {
+    return request(`/room-connections/${encodeURIComponent(connectionId)}`, emptyResponseSchema, {
+      keepalive,
+      method: "DELETE",
+    });
+  },
+  command(connectionId: ConnectionId, input: ClientCommand) {
+    const command = clientCommandSchema.parse(input);
+    return request(
+      `/room-connections/${encodeURIComponent(connectionId)}/commands`,
+      roomConnectionCommandResponseSchema,
+      { body: jsonBody(command), method: "POST" },
+    );
+  },
+  open(signal?: AbortSignal): Promise<RoomConnectionOpenResponse> {
+    return request("/room-connections", roomConnectionOpenResponseSchema, {
+      body: jsonBody({ protocol: 1 }),
+      method: "POST",
+      ...(signal === undefined ? {} : { signal }),
+    });
+  },
+  poll(connectionId: ConnectionId, signal?: AbortSignal): Promise<RoomConnectionPollResponse> {
+    return request(
+      `/room-connections/${encodeURIComponent(connectionId)}/poll`,
+      roomConnectionPollResponseSchema,
+      { body: "{}", method: "POST", ...(signal === undefined ? {} : { signal }) },
+    );
   },
 };
 

@@ -101,15 +101,15 @@ def architecture():
     c.box(65, 95, 245, 58, ["公共应用外壳", "登录 / 首页 / 房间 / 聊天"], BLUE, size=12)
     c.box(340, 95, 245, 58, ["游戏 Web 插件", "棋盘 / 设置 / 动画"], GREEN, size=12)
     c.box(615, 95, 220, 58, ["房间状态 Store", "完整投影快照"], PURPLE, size=12)
-    c.box(865, 95, 245, 58, ["HTTP + WebSocket 客户端", "Cookie / revision / requestId"], ORANGE, size=12)
+    c.box(865, 95, 245, 58, ["HTTP + 房间连接客户端", "WS / 长轮询 / Cookie"], ORANGE, size=12)
 
-    c.box(450, 210, 300, 62, ["Nginx", "静态资源 / API / WebSocket"], GRAY, size=13)
+    c.box(450, 210, 300, 62, ["Nginx", "静态资源 / API / WS"], GRAY, size=13)
     c.line(987, 175, 750, 210)
 
     c.rect(30, 315, 1140, 290, "#FBFCFD", "#7A8795", rx=8)
     c.text(50, 340, "Node.js / Fastify 服务", size=14, anchor="start", bold=True)
     c.box(65, 365, 205, 70, ["HTTP API", "认证 / 目录 / 后台"], BLUE)
-    c.box(295, 365, 205, 70, ["WebSocket 网关", "身份 / 限流 / 路由"], BLUE)
+    c.box(295, 365, 205, 70, ["房间连接网关", "WS / 长轮询 / 路由"], BLUE)
     c.box(525, 365, 250, 70, ["Room Registry + Queue", "内存房间 / 串行命令"], PURPLE)
     c.box(800, 365, 205, 70, ["Game Host", "生命周期 / 投影"], GREEN)
     c.box(1025, 365, 110, 70, ["审计", "日志"], GRAY, size=12)
@@ -144,7 +144,7 @@ def plugin_boundary():
     c.text(65, 82, "单个 games/<game-id> 包", size=15, anchor="start", bold=True)
 
     c.box(335, 105, 450, 95, ["shared", "manifest / settings / actions / safe view", "浏览器与服务端均可依赖"], YELLOW)
-    c.box(90, 270, 400, 130, ["server", "权威状态 / 规则 / 截止任务", "projectView / 可选 AI", "不得依赖 React 或 WebSocket"], GREEN)
+    c.box(90, 270, 400, 130, ["server", "权威状态 / 规则 / 截止任务", "projectView / 可选 AI", "不得依赖 React 或传输层"], GREEN)
     c.box(630, 270, 400, 130, ["web", "设置编辑器 / 游戏界面", "输入预检 / 展示事件动画", "不得导入权威状态或 AI"], BLUE)
 
     c.box(90, 475, 400, 85, ["平台服务端", "Room Queue / Game Host / Scheduler"], PURPLE)
@@ -191,11 +191,11 @@ def data_model():
 def deployment():
     c = Canvas(1160, 650, "Tabletop 单机部署拓扑")
     c.box(55, 210, 210, 90, ["Chrome / Edge", "公网 IP HTTP :80"], BLUE)
-    c.box(355, 190, 240, 130, ["Nginx", "静态文件", "/api 反向代理", "/ws Upgrade"], GRAY)
+    c.box(355, 190, 240, 130, ["Nginx", "静态文件", "/api + 长轮询", "/ws Upgrade"], GRAY)
     c.box(700, 175, 300, 160, ["tabletop.service", "Node.js 22 + Fastify", "127.0.0.1:3000", "User=tabletop", "房间状态在内存"], GREEN)
     c.line(265, 255, 355, 255)
     c.line(595, 235, 700, 235)
-    c.text(647, 220, "HTTP API", size=11, color=SUB)
+    c.text(647, 220, "HTTP API / 长轮询", size=11, color=SUB)
     c.line(595, 285, 700, 285)
     c.text(647, 306, "WebSocket", size=11, color=SUB)
 

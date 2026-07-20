@@ -14,7 +14,7 @@ Tabletop 有两个不同层面的服务控制，使用前必须先区分影响�
 | 暂停全站游戏 | 网页后台的“全站服务”开关 | 立即终止全部房间；普通用户看到维护提示 | 否 | 正常维护、暂时不让玩家进入 |
 | 暂停某一种游戏 | 网页后台的对应游戏开关 | 立即终止该游戏的房间；其他游戏继续可玩 | 否 | 修复或临时下线单个游戏 |
 | 停止应用进程 | `operations.sh stop` 或 `systemctl stop tabletop.service` | 内存中的全部房间、聊天和对局都会丢失 | 只停止 Node.js；Nginx 仍运行 | 进程级维护、故障处理 |
-| 停止整个网页入口 | `systemctl stop tabletop.service nginx.service` | 页面、API 和 WebSocket 全部不可用 | 是 | 专用服务器停机维护 |
+| 停止整个网页入口 | `systemctl stop tabletop.service nginx.service` | 页面、API、长轮询和 WebSocket 全部不可用 | 是 | 专用服务器停机维护 |
 
 全站或单游戏开关的状态保存于 SQLite，重启后仍然生效；重新开启也不会恢复已经终止的房间。系统级停止不会给网页显示维护提示，因此在计划维护时，先在后台关闭全站服务，再等待用户离开或确认房间已终止，最后再执行系统级操作。
 
@@ -252,4 +252,4 @@ free -h
 
 ## 6. 当前 HTTP 限制
 
-当前入口为公网 IP 的 HTTP `80`，仅适合阶段性联调。用户名、密码和 Cookie 在传输中没有 TLS 保护。取得域名后，应按[部署与运维设计](deployment.md)第 9 节配置 HTTPS、把 `COOKIE_SECURE` 改为 `true`，并重新验证登录、后台写操作和 WebSocket。
+当前入口为公网 IP 的 HTTP `80`，仅适合阶段性联调。用户名、密码和 Cookie 在传输中没有 TLS 保护。取得域名后，应按[部署与运维设计](deployment.md)第 9 节配置 HTTPS、把 `COOKIE_SECURE` 改为 `true`，并重新验证登录、后台写操作、WebSocket 和长轮询降级。

@@ -10,7 +10,7 @@ import {
   utcDateTimeSchema,
 } from "../ids.js";
 import { jsonValueSchema, type JsonValue } from "../json.js";
-import { roomStatusSchema } from "../http/rooms.js";
+import { roomStatusSchema } from "../room.js";
 
 export const memberConnectionStatusSchema = z.enum(["connected", "reconnecting", "offline"]);
 

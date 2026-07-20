@@ -51,7 +51,7 @@ CI 或精简开发机可额外设置 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` 与 `
 
 ## 部署
 
-生产目标是单台受支持的 Linux 云服务器。root 手工执行 provision 和发布脚本，Node.js 服务以专用低权限用户运行；Nginx 提供静态页面并代理 HTTP API 与 WebSocket，SQLite 每日在线备份并保留 30 天。
+生产目标是单台受支持的 Linux 云服务器。root 手工执行 provision 和发布脚本，Node.js 服务以专用低权限用户运行；Nginx 提供静态页面并代理 HTTP API、长轮询与 WebSocket，SQLite 每日在线备份并保留 30 天。
 
 ```bash
 bash scripts/provision-server.sh

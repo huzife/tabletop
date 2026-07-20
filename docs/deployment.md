@@ -14,14 +14,14 @@
 | `scripts/operations.sh` | 已发布服务器的状态、日志、启停、发布、备份和恢复包装命令 |
 | `scripts/migrate-db.mjs` | 调用已构建数据库包的正式迁移入口 |
 | `deploy/tabletop.env.example` | 生产环境变量模板，不包含真实秘密 |
-| `deploy/nginx/tabletop.conf` | HTTP、静态资源、API 和 WebSocket 入口 |
+| `deploy/nginx/tabletop.conf` | HTTP、静态资源、API、长轮询和 WebSocket 入口 |
 | `deploy/systemd/` | 应用 service 与每日备份 service/timer |
 
 ## 1. 部署拓扑
 
 ```mermaid
 flowchart LR
-  browser["Chrome / Edge<br/>HTTP :80"] --> nginx["Nginx<br/>静态页面 / API / WebSocket"]
+  browser["Chrome / Edge<br/>HTTP :80"] --> nginx["Nginx<br/>静态页面 / API / 长轮询 / WebSocket"]
   nginx --> node["tabletop.service<br/>Node.js 22 / 127.0.0.1:3000"]
   nginx --> release["/opt/tabletop/current<br/>网页构建"]
   node --> release
@@ -29,7 +29,7 @@ flowchart LR
   db --> backup["/var/backups/tabletop<br/>每日在线备份 / 保留 30 天"]
 ```
 
-Nginx 是唯一公开的应用入口：直接提供 `apps/web/dist`，把 `/api/` 和 `/ws` 转发到只监听 `127.0.0.1:3000` 的 Node.js 服务。账号、会话、服务开关和审计保存在 SQLite 中；房间与对局只保存在内存中，服务重启或发布会终止当前对局。
+Nginx 是唯一公开的应用入口：直接提供 `apps/web/dist`，把 `/api/`（包含长轮询）和 `/ws` 转发到只监听 `127.0.0.1:3000` 的 Node.js 服务。账号、会话、服务开关和审计保存在 SQLite 中；房间与对局只保存在内存中，服务重启或发布会终止当前对局。
 
 部署采用独立 release 目录。新版本在不影响当前服务的目录中完成安装、检查和构建，数据库备份后短暂停服迁移，再原子切换 `current` 符号链接。服务器保留最近两个 release。
 
@@ -178,7 +178,7 @@ CLI 在终端中询问用户名、密码和二次确认，密码输入不回显�
 Nginx 配置包含：
 
 - `/assets/` 提供带内容哈希的静态资源，缓存一年；SPA 页面和路由使用 `no-cache`。
-- `/api/` 保留主机、来源地址和协议并转发到 Node.js。
+- `/api/` 保留主机、来源地址和协议，关闭代理缓冲并转发到 Node.js；30 秒读取超时高于应用 15 秒的单次长轮询等待。
 - `/ws` 使用 HTTP/1.1 Upgrade、关闭代理缓冲，读取超时 75 秒，高于应用 ping 周期。
 - `/health/live` 与 `/health/ready` 只允许本机访问。
 - 单个请求体上限 64 KiB，拒绝 dotfile 和 sourcemap 请求，并设置基础安全响应头。
@@ -302,7 +302,7 @@ sqlite3 /var/lib/tabletop/tabletop.db 'PRAGMA integrity_check;'
 1. 配置 DNS 与云安全组 443。
 2. 安装受信任证书，让 Nginx 监听 443，并将 80 永久重定向到 HTTPS。
 3. 把 `/etc/tabletop/tabletop.env` 的 `COOKIE_SECURE` 改为 `true`。
-4. 重启应用，清理旧 Cookie，重新验证登录、改密、管理接口和 WebSocket Origin。
+4. 重启应用，清理旧 Cookie，重新验证登录、改密、管理接口、WebSocket Origin 和长轮询 CSRF。
 
 证书和私钥只能保存在服务器受限目录中，不能加入本仓库。
 
@@ -311,7 +311,7 @@ sqlite3 /var/lib/tabletop/tabletop.db 'PRAGMA integrity_check;'
 - 服务器重启后 Nginx 与 Tabletop 自动启动，SQLite 数据和服务开关保留。
 - UFW 与云安全组只开放必要的 22、80；公网无法连接 3000。
 - 普通用户不能注册，管理员 CLI 只能初始化一个管理员，后台可以管理账号和服务开关。
-- 两个浏览器可以建立房间、完成 WebSocket 对局、聊天和 30 秒内重连。
+- 两个浏览器可以建立房间、完成 WebSocket 对局、聊天和 30 秒内重连；模拟 WebSocket 被禁用后可通过 HTTP 长轮询完成建连、进房和房间命令。
 - 发布会终止内存对局但保留账号数据；构建或健康检查失败不留下半发布版本。
 - 每日备份 timer 正常运行，备份能通过完整性检查，30 天轮转生效。
 - 从实际备份完成一次恢复演练，账号、会话规则和服务开关符合预期。

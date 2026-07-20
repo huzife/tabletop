@@ -16,7 +16,7 @@ import {
 import { KeyedMutex } from "./lib/keyed-mutex.js";
 import { MAINTENANCE_INTERVAL_MS, runPersistentCleanup } from "./maintenance.js";
 import { RoomRegistry } from "./rooms/registry.js";
-import { RoomWebSocketGateway } from "./rooms/gateway.js";
+import { RoomConnectionGateway } from "./rooms/gateway.js";
 
 export async function createRuntime(
   config: AppConfig,
@@ -37,7 +37,7 @@ export async function createRuntime(
       ? new SingleWorkerAutomationExecutor()
       : new InProcessAutomationExecutor();
   const rooms = new RoomRegistry({ automation, games, repositories });
-  let gateway: RoomWebSocketGateway | undefined;
+  let gateway: RoomConnectionGateway | undefined;
   const admin = new AdminService({
     accountLocks,
     games: games.list().map(({ manifest }) => ({
@@ -74,7 +74,7 @@ export async function createRuntime(
     },
     rooms,
   });
-  gateway = new RoomWebSocketGateway({ app, auth, config, rooms });
+  gateway = new RoomConnectionGateway({ app, auth, config, rooms });
   rooms.setPublisher(gateway);
   gateway.start();
 

@@ -1,9 +1,17 @@
 import { z } from "zod";
 
-import { gameIdSchema, joinTicketSchema, roomIdSchema, utcDateTimeSchema } from "../ids.js";
+import {
+  connectionIdSchema,
+  gameIdSchema,
+  joinTicketSchema,
+  roomIdSchema,
+  utcDateTimeSchema,
+} from "../ids.js";
 import { jsonValueSchema } from "../json.js";
-
-export const roomStatusSchema = z.enum(["lobby", "playing", "post_match"]);
+import { roomStatusSchema } from "../room.js";
+import { serverMessageSchema } from "../ws/server-messages.js";
+export { roomStatusSchema } from "../room.js";
+export type { RoomStatus } from "../room.js";
 
 const queryBooleanSchema = z
   .union([z.boolean(), z.enum(["true", "false"])])
@@ -69,11 +77,37 @@ export const joinTicketResponseSchema = z.strictObject({
   expiresAt: utcDateTimeSchema,
 });
 
+export const roomConnectionOpenRequestSchema = z.strictObject({
+  protocol: z.literal(1),
+});
+
+const roomConnectionCloseSchema = z.strictObject({
+  code: z.number().int().min(1_000).max(4_999),
+  reason: z.string().max(120),
+});
+
+export const roomConnectionOpenResponseSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  messages: z.array(serverMessageSchema).min(1).max(128),
+});
+
+export const roomConnectionPollResponseSchema = z.strictObject({
+  messages: z.array(serverMessageSchema).max(128),
+  close: roomConnectionCloseSchema.optional(),
+});
+
+export const roomConnectionCommandResponseSchema = z.strictObject({
+  accepted: z.literal(true),
+});
+
 export type CreateRoomRequest = z.infer<typeof createRoomRequestSchema>;
 export type CreateRoomResponse = z.infer<typeof createRoomResponseSchema>;
 export type JoinTicketRequest = z.infer<typeof joinTicketRequestSchema>;
 export type JoinTicketResponse = z.infer<typeof joinTicketResponseSchema>;
+export type RoomConnectionCommandResponse = z.infer<typeof roomConnectionCommandResponseSchema>;
+export type RoomConnectionOpenRequest = z.infer<typeof roomConnectionOpenRequestSchema>;
+export type RoomConnectionOpenResponse = z.infer<typeof roomConnectionOpenResponseSchema>;
+export type RoomConnectionPollResponse = z.infer<typeof roomConnectionPollResponseSchema>;
 export type RoomListQuery = z.infer<typeof roomListQuerySchema>;
-export type RoomStatus = z.infer<typeof roomStatusSchema>;
 export type RoomSummary = z.infer<typeof roomSummarySchema>;
 export type RoomsResponse = z.infer<typeof roomsResponseSchema>;

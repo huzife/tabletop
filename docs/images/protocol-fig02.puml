@@ -6,13 +6,13 @@ autonumber
 
 actor 玩家
 participant 浏览器
-participant "WebSocket 网关" as Gateway
+participant "房间连接网关" as Gateway
 participant "房间队列" as Queue
 participant "Game Host / 插件" as Host
 participant "Deadline Scheduler" as Scheduler
 participant "可选兜底控制器" as Fallback
 
-Gateway -x 浏览器 : TCP / WebSocket 断开
+Gateway -x 浏览器 : 活动房间传输断开
 Gateway -> Queue : connection.lost(sessionId)
 Queue -> Scheduler : schedule(+30s, recoveryId)
 Queue -> Host : systemEvent(connection.lost)
@@ -25,7 +25,7 @@ opt 插件启用临时控制
 end
 
 玩家 -> 浏览器 : 网络恢复
-浏览器 -> Gateway : 新 WebSocket + 会话 Cookie
+浏览器 -> Gateway : 新 WebSocket 或长轮询 + 会话 Cookie
 Gateway --> 浏览器 : connection.ready
 浏览器 -> Gateway : room.resume(roomId)
 Gateway -> Queue : resume(sessionId, recoveryId)

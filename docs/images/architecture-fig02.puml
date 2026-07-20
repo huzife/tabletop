@@ -6,7 +6,7 @@ autonumber
 
 actor 玩家
 participant "浏览器公共外壳" as Web
-participant "WebSocket 网关" as Gateway
+participant "房间连接网关" as Gateway
 participant "房间串行队列" as Queue
 participant "Game Host" as Host
 participant "游戏 Server 插件" as Plugin
@@ -14,7 +14,7 @@ participant "Deadline Scheduler" as Scheduler
 collections "玩家 / 观众连接" as Peers
 
 玩家 -> Web : 提交插件定义的游戏动作
-Web -> Gateway : game.action\nrequestId + expectedRevision
+Web -> Gateway : game.action（WS 或 HTTP）\nrequestId + expectedRevision
 Gateway -> Gateway : 会话、大小、频率校验\n记录 receivedAt
 Gateway -> Queue : 提交不可变命令
 Queue -> Queue : 幂等、房间、对局、控制权校验

@@ -14,9 +14,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { webGameRegistry } from "../games/registry";
 import { consumeStoredJoinTicket } from "./entry-context";
+import { RoomLongPollingTransport, type LongPollingTransportClose } from "./long-polling-transport";
 
 const RECONNECT_WINDOW_MS = 30_000;
 const RECONNECT_DELAYS_MS = [0, 500, 1_000, 2_000, 3_000, 5_000] as const;
+const WEB_SOCKET_ESTABLISH_TIMEOUT_MS = 5_000;
 
 type ManagedCommand = Exclude<ClientCommand, RoomJoinCommand | RoomResumeCommand>;
 type StripManagedEnvelope<T> = T extends ManagedCommand
@@ -119,7 +121,11 @@ export function useRoomSocket(
     let reconnectDeadline = 0;
     let reconnectExpiryTimer: number | undefined;
     let reconnectTimer: number | undefined;
+    let webSocketEstablishTimer: number | undefined;
     let socket: WebSocket | null = null;
+    let polling: RoomLongPollingTransport | null = null;
+    let preferLongPolling = false;
+    let currentTransportHadSnapshot = false;
     const sentCommands = new Map<RequestId, ClientCommand>();
     const pending = new Map<RequestId, ClientCommand["type"]>();
     const entryState = entryStateRef.current;
@@ -128,6 +134,11 @@ export function useRoomSocket(
       if (reconnectExpiryTimer === undefined) return;
       window.clearTimeout(reconnectExpiryTimer);
       reconnectExpiryTimer = undefined;
+    };
+    const clearWebSocketEstablishTimer = () => {
+      if (webSocketEstablishTimer === undefined) return;
+      window.clearTimeout(webSocketEstablishTimer);
+      webSocketEstablishTimer = undefined;
     };
     const ensureReconnectDeadline = () => {
       if (reconnectDeadline === 0) reconnectDeadline = Date.now() + RECONNECT_WINDOW_MS;
@@ -141,6 +152,7 @@ export function useRoomSocket(
           setConnectionStatus("offline");
           setError(socketError("SOCKET_RECONNECT_EXPIRED", "30 秒内未能恢复房间连接"));
           socket?.close(4000, "重连窗口已结束");
+          polling?.close();
         },
         Math.max(0, reconnectDeadline - Date.now()),
       );
@@ -167,11 +179,23 @@ export function useRoomSocket(
         publishPending();
       }
     };
+    const isWebSocketOpen = () => socket !== null && socket.readyState === WebSocket.OPEN;
+    const isTransportOpen = () => isWebSocketOpen() || polling?.isOpen === true;
+    const sendTransport = (command: ClientCommand): boolean => {
+      if (isWebSocketOpen() && socket !== null) {
+        socket.send(JSON.stringify(command));
+        return true;
+      }
+      return polling?.send(command) ?? false;
+    };
+    const closeTransport = (code: number, reason: string) => {
+      socket?.close(code, reason);
+      polling?.close();
+    };
     const sendParsed = (command: ClientCommand, userCommand: boolean): boolean => {
-      if (socket?.readyState !== WebSocket.OPEN) return false;
+      if (!isTransportOpen()) return false;
       rememberCommand(command, userCommand);
-      socket.send(JSON.stringify(command));
-      return true;
+      return sendTransport(command);
     };
     const sendResume = () => {
       ensureReconnectDeadline();
@@ -213,7 +237,7 @@ export function useRoomSocket(
       intentionalClose = true;
       setError(socketError("SOCKET_PROTOCOL_ERROR", message));
       setConnectionStatus("offline");
-      socket?.close(1002, "协议消息无效");
+      closeTransport(1002, "协议消息无效");
     };
 
     const parseSnapshot = (
@@ -277,7 +301,7 @@ export function useRoomSocket(
             failedCommand?.type === "room.resume" &&
             message.payload.code === "ROOM_INVALID_STATE" &&
             Date.now() < reconnectDeadline &&
-            socket?.readyState === WebSocket.OPEN
+            isTransportOpen()
           ) {
             window.setTimeout(sendResume, 250);
             break;
@@ -287,7 +311,7 @@ export function useRoomSocket(
             message.payload.code === "ROOM_PERMISSION_DENIED" &&
             entryState.ambiguousJoin &&
             !entryState.ticketFallbackAttempted &&
-            socket?.readyState === WebSocket.OPEN
+            isTransportOpen()
           ) {
             entryState.ambiguousJoin = false;
             sendJoin(true);
@@ -295,7 +319,7 @@ export function useRoomSocket(
           }
           if (message.payload.resyncRequired && failedCommand !== undefined) {
             // The gateway treats a repeated request ID as a snapshot request without applying it twice.
-            socket?.send(JSON.stringify(failedCommand));
+            sendTransport(failedCommand);
           }
           const commandError = socketError(message.payload.code, message.payload.message, {
             ...(failedCommand === undefined ? {} : { commandType: failedCommand.type }),
@@ -305,7 +329,7 @@ export function useRoomSocket(
           if (failedCommand?.type === "room.join" || failedCommand?.type === "room.resume") {
             intentionalClose = true;
             setConnectionStatus("offline");
-            socket?.close(1000, "无法进入房间");
+            closeTransport(1000, "无法进入房间");
           }
           break;
         }
@@ -322,6 +346,8 @@ export function useRoomSocket(
           entryState.established = true;
           entryState.joinInFlight = false;
           entryState.ambiguousJoin = false;
+          currentTransportHadSnapshot = true;
+          clearWebSocketEstablishTimer();
           reconnectAttempt = 0;
           clearReconnectExpiry();
           reconnectDeadline = 0;
@@ -334,7 +360,7 @@ export function useRoomSocket(
           clearPending();
           setConnectionStatus("closed");
           setError(socketError("ROOM_CLOSED", message.payload.message));
-          socket?.close(1000, "房间已关闭");
+          closeTransport(1000, "房间已关闭");
           break;
         case "room.connection.changed":
           // A complete, viewer-specific snapshot follows every runtime connection transition.
@@ -370,17 +396,83 @@ export function useRoomSocket(
       reconnectTimer = window.setTimeout(connect, delay);
     };
 
-    function connect() {
+    const handleTransportClose = (event: LongPollingTransportClose) => {
+      clearPending();
+      if (entryState.joinInFlight && !entryState.established) {
+        entryState.joinInFlight = false;
+        entryState.ambiguousJoin = true;
+      }
       if (disposed || intentionalClose) return;
-      if (socket !== null && socket.readyState !== WebSocket.CLOSED) return;
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
-      reconnectTimer = undefined;
+      if (event.code === 4001 || event.code === 4003 || event.code === 4004) {
+        intentionalClose = true;
+        setConnectionStatus("offline");
+        setError(
+          socketError(
+            event.code === 4001
+              ? "CONNECTION_ROOM_CONFLICT"
+              : event.code === 4003
+                ? "ROOM_PERMISSION_DENIED"
+                : "AUTH_SESSION_EXPIRED",
+            event.reason ||
+              (event.code === 4001
+                ? "房间控制已转移到同一设备的其他页面"
+                : event.code === 4003
+                  ? "已被房主移出房间"
+                  : "登录会话已失效"),
+          ),
+        );
+        return;
+      }
+      scheduleReconnect();
+    };
+
+    const connectLongPolling = () => {
+      clearWebSocketEstablishTimer();
+      const connectedPolling = new RoomLongPollingTransport({
+        onClose: (event) => {
+          if (polling !== connectedPolling) return;
+          polling = null;
+          currentTransportHadSnapshot = false;
+          handleTransportClose(event);
+        },
+        onMessage: (message) => {
+          if (polling === connectedPolling) handleServerMessage(JSON.stringify(message));
+        },
+      });
+      polling = connectedPolling;
+      currentTransportHadSnapshot = false;
+      void connectedPolling.open();
+    };
+
+    const connectWebSocket = () => {
       let connectedSocket: WebSocket;
       try {
         connectedSocket = new WebSocket(webSocketUrl());
         socket = connectedSocket;
         socketRef.current = connectedSocket;
+        currentTransportHadSnapshot = false;
+        clearWebSocketEstablishTimer();
+        webSocketEstablishTimer = window.setTimeout(() => {
+          if (
+            disposed ||
+            intentionalClose ||
+            socket !== connectedSocket ||
+            currentTransportHadSnapshot
+          ) {
+            return;
+          }
+          preferLongPolling = true;
+          socket = null;
+          if (socketRef.current === connectedSocket) socketRef.current = null;
+          try {
+            connectedSocket.close(4000, "WebSocket 建连超时");
+          } catch {
+            // A browser policy can reject operations on a disabled WebSocket implementation.
+          }
+          handleTransportClose({ code: 1006, reason: "WebSocket 建连超时" });
+        }, WEB_SOCKET_ESTABLISH_TIMEOUT_MS);
       } catch {
+        preferLongPolling = true;
         scheduleReconnect();
         return;
       }
@@ -408,44 +500,32 @@ export function useRoomSocket(
         failProtocol("服务端返回了不支持的消息类型");
       });
       connectedSocket.addEventListener("close", (event) => {
+        clearWebSocketEstablishTimer();
         if (socketRef.current === connectedSocket) socketRef.current = null;
         if (socket !== connectedSocket) return;
+        const failedBeforeSnapshot = !currentTransportHadSnapshot;
         socket = null;
-        clearPending();
-        if (entryState.joinInFlight && !entryState.established) {
-          entryState.joinInFlight = false;
-          entryState.ambiguousJoin = true;
-        }
-        if (disposed || intentionalClose) return;
-        if (event.code === 4001 || event.code === 4003 || event.code === 4004) {
-          intentionalClose = true;
-          setConnectionStatus("offline");
-          setError(
-            socketError(
-              event.code === 4001
-                ? "CONNECTION_ROOM_CONFLICT"
-                : event.code === 4003
-                  ? "ROOM_PERMISSION_DENIED"
-                  : "AUTH_SESSION_EXPIRED",
-              event.reason ||
-                (event.code === 4001
-                  ? "房间控制已转移到同一设备的其他页面"
-                  : event.code === 4003
-                    ? "已被房主移出房间"
-                    : "登录会话已失效"),
-            ),
-          );
-          return;
-        }
-        scheduleReconnect();
+        currentTransportHadSnapshot = false;
+        if (failedBeforeSnapshot) preferLongPolling = true;
+        handleTransportClose({ code: event.code, reason: event.reason });
       });
       connectedSocket.addEventListener("error", () => {
-        // Browsers intentionally hide handshake details; close drives the bounded retry loop.
+        // Browsers intentionally hide handshake details; close drives the fallback decision.
       });
+    };
+
+    function connect() {
+      if (disposed || intentionalClose) return;
+      if (socket !== null && socket.readyState !== WebSocket.CLOSED) return;
+      if (polling !== null) return;
+      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+      if (preferLongPolling) connectLongPolling();
+      else connectWebSocket();
     }
 
     sendCommandRef.current = (input) => {
-      if (intentionalClose || socket?.readyState !== WebSocket.OPEN) return null;
+      if (intentionalClose || !isTransportOpen()) return null;
       const requestId = createRequestId();
       const parsed = clientCommandSchema.safeParse({
         ...input,
@@ -469,12 +549,21 @@ export function useRoomSocket(
       intentionalClose = false;
       reconnectAttempt = 0;
       reconnectDeadline = Date.now() + RECONNECT_WINDOW_MS;
+      preferLongPolling = false;
       ensureReconnectDeadline();
       setError(null);
       setConnectionStatus("reconnecting");
-      if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+      if (
+        socket !== null &&
+        (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
+      ) {
         socket.close(4000, "重新连接");
         return;
+      }
+      if (polling !== null) {
+        const previousPolling = polling;
+        polling = null;
+        previousPolling.close();
       }
       connect();
     };
@@ -492,9 +581,11 @@ export function useRoomSocket(
       }
       window.removeEventListener("online", handleOnline);
       clearReconnectExpiry();
+      clearWebSocketEstablishTimer();
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       clearPending();
       socket?.close(1000, "页面已离开");
+      polling?.close();
       if (socketRef.current === socket) socketRef.current = null;
       sendCommandRef.current = () => null;
       retryRef.current = () => undefined;

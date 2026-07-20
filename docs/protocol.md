@@ -2,7 +2,7 @@
 
 > 状态：已实现的协议 v1 基线
 > 协议版本：v1
-> 传输：HTTP/JSON + WebSocket/JSON
+> 传输：HTTP/JSON + WebSocket/JSON（HTTP 长轮询后备）
 
 ## 1. 设计原则
 
@@ -10,7 +10,7 @@
 
 关键原则如下：
 
-- HTTP 处理低频资源与管理操作，WebSocket 处理房间成员、聊天和游戏实时命令。
+- HTTP 处理资源与管理操作；房间连接优先使用 WebSocket，在浏览器或网络禁用 WebSocket 时使用共享协议的 HTTP 长轮询后备。
 - 会话身份来自 Cookie，不允许客户端声明账号或角色。
 - 每条写命令有唯一 `requestId`，每个房间状态有单调递增 `revision`。
 - 服务端成功处理后返回带 `stateChanged` 的确认；状态变化时再发送按接收者投影的完整快照，展示事件只辅助动画。
@@ -92,9 +92,9 @@
 
 所有管理写接口需要管理员角色与 CSRF 防护，并在同一数据库事务中写入操作结果和审计记录。导出 CSV 时对以 `= + - @` 开头的文本做转义，避免电子表格公式注入。
 
-## 6. WebSocket 建连
+## 6. 房间连接与传输
 
-客户端使用当前站点的 `/ws?protocol=1` 建立连接，浏览器自动携带会话 Cookie。服务端按以下顺序处理：
+客户端优先使用当前站点的 `/ws?protocol=1` 建立 WebSocket，浏览器自动携带会话 Cookie。服务端按以下顺序处理：
 
 1. 校验 Origin、协议版本、会话和全站状态。
 2. 分配 `connectionId`，加载 `accountId` 与 `sessionId`。
@@ -102,9 +102,22 @@
 4. 客户端使用 join ticket 提交 `room.join`，或在重连时提交原房间恢复信息。
 5. 服务端建立成员绑定后发送完整 `room.snapshot`。
 
-升级握手后，每个客户端帧先经过纯内存连接限流，再重新验证会话，最后执行 JSON、Zod 和房间命令处理；心跳也会周期重验会话。这样注销、改密、管理员重置或自然过期会关闭已有 WebSocket，同时超限帧不会先触发数据库查询。
+升级握手后，每个客户端帧先经过纯内存连接限流，再重新验证会话，最后执行 JSON、Zod 和房间命令处理；心跳也会周期重验会话。这样注销、改密、管理员重置或自然过期会关闭已有连接，同时超限帧不会先触发数据库查询。
 
-心跳由服务端每 20 秒发 WebSocket ping，10 秒内没有 pong 则关闭连接并触发断线处理。当前房间页面为该页面生命周期建立一条活动连接；离开页面会关闭连接，重新进入或网络中断后创建新连接。
+若 WebSocket 构造或握手失败，或者建立后 5 秒内仍未收到首个房间快照，浏览器自动切换到同源 HTTP 长轮询。已经成功收到过快照的 WebSocket 断开时，客户端先尝试恢复一次 WebSocket；新连接仍无法取得快照时再切换长轮询。这个选择只改变传输，不改变 `connectionId`、命令信封、请求去重、房间绑定、快照或重连语义。
+
+长轮询使用以下认证写接口，全部要求当前会话、同源 Origin、CSRF Cookie 与请求头：
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `POST /api/v1/room-connections` | 创建连接；请求 `{ "protocol": 1 }`，响应含 `connectionId` 和首条 `connection.ready` |
+| `POST /api/v1/room-connections/:connectionId/poll` | 等待服务端消息；单次最多挂起 15 秒，返回消息数组和可选关闭原因 |
+| `POST /api/v1/room-connections/:connectionId/commands` | 提交与 WebSocket 完全相同的 `ClientCommand`；`202` 只表示网关接收，业务结果仍由消息返回 |
+| `DELETE /api/v1/room-connections/:connectionId` | 页面离开时主动关闭连接 |
+
+同一长轮询连接只允许一个等待中的 poll，请求或命令会刷新 45 秒连接租约。服务端出站队列最多保留 128 条消息；没有 `causedBy` 的同房间完整快照可以被更新版本替换，带 `causedBy` 的重同步快照、确认、错误和关闭消息不会合并。队列溢出或租约到期会关闭连接并进入正常的 30 秒房间重连流程。
+
+WebSocket 心跳由服务端每 20 秒发送 ping，10 秒内没有 pong 则关闭连接。当前房间页面为该页面生命周期建立一条活动房间连接；离开页面会关闭连接，重新进入或网络中断后创建新连接。
 
 ## 7. 消息信封
 
@@ -209,7 +222,7 @@ interface ServerMessage<TPayload> {
 
 ### 9.2 已定义但尚未由网关发送的预留消息
 
-`packages/protocol/src/ws/server-messages.ts` 已为 `room.connection.changed` 和 `service.status.changed` 保留 v1 schema，但当前 `RoomWebSocketGateway` 不发送这两类消息，它们不属于首期客户端必须依赖的行为：
+`packages/protocol/src/ws/server-messages.ts` 已为 `room.connection.changed` 和 `service.status.changed` 保留 v1 schema，但当前 `RoomConnectionGateway` 不发送这两类消息，它们不属于首期客户端必须依赖的行为：
 
 - 成员的 `connected`、`reconnecting`、`offline`、`reconnectUntil` 和座位控制器变化以 `room.snapshot` 为准。
 - 服务关闭通过受影响连接的 `room.closed` 表达；目录或后台页面通过 HTTP 重新读取全站/单游戏开关。
@@ -220,24 +233,24 @@ interface ServerMessage<TPayload> {
 
 下图展示正常游戏动作、重复请求和过期修订号的处理位置。
 
-![图10-1 WebSocket 命令处理时序](images/protocol-fig01.png)
+![图10-1 房间命令处理时序](images/protocol-fig01.png)
 
 网关在连接限流、会话重验和完整解析后记录 `receivedAtMonotonic`。房间计时裁决使用这个接收时间，而不是异步队列真正开始执行的时间，避免服务器短暂排队让玩家无故超时。
 
 网关与每房命令队列处理动作时：
 
-1. 网关在当前 WebSocket 连接的最近请求缓存中查找 `requestId`。
+1. 网关在当前房间连接的最近请求缓存中查找 `requestId`。
 2. 同一连接内的重复请求不重复迁移状态；已绑定房间时重发当前快照。缓存会在首次解析后、执行前记录该 ID，因此同一连接上重试失败命令也必须使用新 `requestId`。
 3. 校验房间、对局和预期修订号。
 4. 校验连接控制权，再调用平台命令或游戏插件。
 5. 若命令或插件转换实际改变状态，则原子替换状态并递增修订号；`noop` 保持原修订号。
 6. 状态变化时为每个接收者生成新投影并发送快照，并向发起连接发送带 `stateChanged` 的成功 ack。
 
-当前每条 WebSocket 连接保留最近 128 个 `requestId`，连接关闭后缓存随之释放。跨重连不能依靠旧连接缓存去重，因此可并发修改的房间命令使用 `expectedRevision`，游戏动作同时带 `matchId`；客户端不会自动重放无法确认是否生效的危险动作。
+当前每条房间连接保留最近 128 个 `requestId`，连接关闭后缓存随之释放。跨重连或跨传输不能依靠旧连接缓存去重，因此可并发修改的房间命令使用 `expectedRevision`，游戏动作同时带 `matchId`；客户端不会自动重放无法确认是否生效的危险动作。
 
 ## 11. 重连协议
 
-断线时原 `sessionId` 的成员和座位恢复信息保存在房间内存中。房间队列同时向插件提交 `connection.lost` 系统事件；插件可以请求临时自动控制，也可以选择其他自身支持的状态变化。浏览器自动重连 WebSocket 后发送 `room.resume`，服务端必须确认账号、原会话、房间和仍有效的恢复窗口匹配。若首次 join 是否送达无法确认，已预绑定但从未 attach 的原会话也可以 resume；这种情况只完成连接，不发送 `connection.restored` 游戏系统事件，并取消尚存的创建 ticket 定时器。
+断线时原 `sessionId` 的成员和座位恢复信息保存在房间内存中。房间队列同时向插件提交 `connection.lost` 系统事件；插件可以请求临时自动控制，也可以选择其他自身支持的状态变化。浏览器重新建立 WebSocket 或长轮询连接后发送 `room.resume`，服务端必须确认账号、原会话、房间和仍有效的恢复窗口匹配。若首次 join 是否送达无法确认，已预绑定但从未 attach 的原会话也可以 resume；这种情况只完成连接，不发送 `connection.restored` 游戏系统事件，并取消尚存的创建 ticket 定时器。
 
 ![图11-1 断线、可选临时接管与快照恢复时序](images/protocol-fig02.png)
 
@@ -269,9 +282,10 @@ interface ServerMessage<TPayload> {
 
 ## 13. 限制与背压
 
-- 单条客户端 WebSocket 消息最大 64 KiB；超出直接关闭连接。
+- 单条客户端 WebSocket 消息和单个 HTTP 请求体最大 64 KiB；超出直接拒绝或关闭连接。
 - 聊天单条 500 字，每会话每 5 秒最多 10 条。
-- 每个 WebSocket 连接每 5 秒最多接收 60 条命令；聊天还受上述更严格的独立限制。
+- 每个房间连接每 5 秒最多接收 60 条命令；长轮询连接每会话每分钟最多创建 10 次，聊天还受上述更严格的独立限制。
+- 长轮询单次等待 15 秒、连接租约 45 秒、出站队列最多 128 条，并拒绝同一连接上的并发 poll。
 - 建房每会话每分钟最多 5 次；join ticket 每会话每分钟最多 30 次，其中房间密码校验最多 10 次。
 - 房间密码 Argon2id 最多并行 2 个任务，额外等待队列最多 16 个；超出后返回 `RATE_ROOM_LIMIT`。
 - 游戏投影的设计目标小于 256 KiB；当前服务端不对单份出站快照另设协议级硬上限，插件必须在测试中控制投影规模。
@@ -279,6 +293,6 @@ interface ServerMessage<TPayload> {
 
 ## 14. 协议版本演进
 
-HTTP 使用路径主版本，WebSocket 在握手和每条信封中携带主版本。当前 Zod 信封是严格 schema，网页遇到未知字段或未知消息类型会以协议错误关闭连接；因此 v1 增加字段或消息时必须同时更新服务端 schema、浏览器 bundle 和兼容测试，不能假设旧客户端会静默忽略。
+HTTP 使用路径主版本，WebSocket 在握手和每条信封中携带主版本，长轮询在创建请求和每条共享信封中携带主版本。当前 Zod 信封是严格 schema，网页遇到未知字段或未知消息类型会以协议错误关闭连接；因此 v1 增加字段或消息时必须同时更新服务端 schema、浏览器 bundle 和兼容测试，不能假设旧客户端会静默忽略。
 
 主版本不兼容时，服务端拒绝握手并返回支持版本。由于网页与服务端同次部署，正常用户会通过刷新获得匹配 bundle；版本机制主要用于缓存页面、部署切换和后续原生客户端可能性。

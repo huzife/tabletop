@@ -8,11 +8,17 @@ import {
   connectionIdSchema,
   memberIdSchema,
   requestIdSchema,
+  roomConnectionCommandResponseSchema,
+  roomConnectionOpenRequestSchema,
+  roomConnectionOpenResponseSchema,
+  roomConnectionPollResponseSchema,
   serverMessageSchema,
   type ClientCommand,
+  type ConnectionId,
   type JsonObject,
   type MemberId,
   type RequestId,
+  type ServerMessage,
 } from "@tabletop/protocol";
 import type { FastifyInstance } from "fastify";
 import { ulid } from "ulid";
@@ -23,29 +29,51 @@ import type { AppConfig } from "../config.js";
 import { HttpError } from "../http/errors.js";
 import { SlidingWindowRateLimiter } from "../lib/rate-limiter.js";
 import { SESSION_COOKIE_NAME } from "../auth/cookies.js";
+import { requireUnsafeSession } from "../auth/request.js";
 import type { AuthService, AuthenticatedSession } from "../auth/service.js";
+import {
+  LongPollingBusyError,
+  LongPollingTransport,
+  type LongPollingResult,
+} from "./long-polling-transport.js";
 import { RoomRegistry } from "./registry.js";
 import type { RoomRuntime } from "./room-runtime.js";
 import type { RoomPublisher, RoomRuntimeLike } from "./types.js";
 
-interface GatewayConnection {
-  readonly connectionId: string;
+const LONG_POLL_TIMEOUT_MS = 15_000;
+const LONG_POLL_LEASE_MS = 45_000;
+
+interface GatewayConnectionBase {
+  readonly connectionId: ConnectionId;
   readonly rateLimiter: SlidingWindowRateLimiter;
   readonly seenRequests: Map<RequestId, true>;
   readonly sessionToken: string;
-  readonly socket: WebSocket;
-  alive: boolean;
   identity: AuthenticatedSession;
   memberId?: MemberId;
   roomId?: string;
+  closeHandled?: boolean;
+}
+
+interface WebSocketGatewayConnection extends GatewayConnectionBase {
+  readonly kind: "websocket";
+  readonly socket: WebSocket;
+  alive: boolean;
   pongTimer?: NodeJS.Timeout;
 }
 
-export class RoomWebSocketGateway implements RoomPublisher {
+interface LongPollingGatewayConnection extends GatewayConnectionBase {
+  readonly kind: "long-polling";
+  readonly transport: LongPollingTransport;
+}
+
+type GatewayConnection = LongPollingGatewayConnection | WebSocketGatewayConnection;
+
+export class RoomConnectionGateway implements RoomPublisher {
   readonly #app: FastifyInstance;
   readonly #auth: AuthService;
   readonly #config: Pick<AppConfig, "COOKIE_SECURE">;
-  readonly #connections = new Map<string, GatewayConnection>();
+  readonly #connections = new Map<ConnectionId, GatewayConnection>();
+  readonly #pollingCreateLimiter = new SlidingWindowRateLimiter({ limit: 10, windowMs: 60_000 });
   readonly #rooms: RoomRegistry;
   readonly #wss = new WebSocketServer({ maxPayload: 64 * 1024, noServer: true });
   #heartbeatTimer?: NodeJS.Timeout;
@@ -63,6 +91,7 @@ export class RoomWebSocketGateway implements RoomPublisher {
   }
 
   start(): void {
+    this.#registerLongPollingRoutes();
     this.#app.server.on("upgrade", this.#handleUpgrade);
     this.#heartbeatTimer = setInterval(() => this.#heartbeat(), 20_000);
     this.#heartbeatTimer.unref();
@@ -71,9 +100,8 @@ export class RoomWebSocketGateway implements RoomPublisher {
   async stop(): Promise<void> {
     this.#app.server.off("upgrade", this.#handleUpgrade);
     if (this.#heartbeatTimer) clearInterval(this.#heartbeatTimer);
-    for (const connection of this.#connections.values()) {
-      if (connection.pongTimer) clearTimeout(connection.pongTimer);
-      connection.socket.close(1001, "服务正在关闭");
+    for (const connection of [...this.#connections.values()]) {
+      this.#closeConnection(connection, 1001, "服务正在关闭");
     }
     await new Promise<void>((resolve) => this.#wss.close(() => resolve()));
   }
@@ -88,7 +116,7 @@ export class RoomWebSocketGateway implements RoomPublisher {
         connection.roomId !== runtime.state.roomId ||
         connection.memberId === undefined ||
         !runtime.state.members.has(connection.memberId) ||
-        connection.socket.readyState !== WebSocket.OPEN
+        !this.#isOpen(connection)
       ) {
         continue;
       }
@@ -117,10 +145,9 @@ export class RoomWebSocketGateway implements RoomPublisher {
   }
 
   disconnectMember(memberId: MemberId, code: number, reason: string): void {
-    const connection = [...this.#connections.values()].find(
-      (candidate) => candidate.memberId === memberId,
-    );
-    connection?.socket.close(code, reason.slice(0, 120));
+    for (const connection of this.#connections.values()) {
+      if (connection.memberId === memberId) this.#closeConnection(connection, code, reason);
+    }
   }
 
   isAccountConnected(accountId: string): boolean {
@@ -132,8 +159,140 @@ export class RoomWebSocketGateway implements RoomPublisher {
   disconnectAccount(accountId: string, reason = "账号会话已失效"): void {
     for (const connection of this.#connections.values()) {
       if (connection.identity.account.id === accountId) {
-        connection.socket.close(4004, reason.slice(0, 120));
+        this.#closeConnection(connection, 4004, reason);
       }
+    }
+  }
+
+  #registerLongPollingRoutes(): void {
+    this.#app.post("/api/v1/room-connections", async (request, reply) => {
+      const identity = requireUnsafeSession(this.#auth, request);
+      roomConnectionOpenRequestSchema.parse(request.body);
+      this.#ensureSiteEnabled();
+      const rate = this.#pollingCreateLimiter.consume(identity.session.id);
+      if (!rate.allowed) {
+        throw new HttpError(429, "RATE_CONNECTION_LIMIT", "房间连接创建过于频繁", {
+          retryAfterMs: rate.retryAfterMs,
+        });
+      }
+
+      for (const existing of [...this.#connections.values()]) {
+        if (
+          existing.kind === "long-polling" &&
+          existing.identity.session.id === identity.session.id
+        ) {
+          this.#closeConnection(existing, 4001, "连接已由同一设备接管");
+        }
+      }
+
+      const sessionToken = request.cookies[SESSION_COOKIE_NAME];
+      if (sessionToken === undefined) {
+        throw new HttpError(401, "AUTH_SESSION_EXPIRED", "登录状态已失效，请重新登录");
+      }
+      const connection = this.#acceptLongPollingConnection(identity, sessionToken);
+      const initial = await connection.transport.poll(0);
+      return reply
+        .code(201)
+        .header("cache-control", "no-store")
+        .header("x-accel-buffering", "no")
+        .send(
+          roomConnectionOpenResponseSchema.parse({
+            connectionId: connection.connectionId,
+            messages: initial.messages,
+          }),
+        );
+    });
+
+    this.#app.post("/api/v1/room-connections/:connectionId/poll", async (request, reply) => {
+      const identity = requireUnsafeSession(this.#auth, request);
+      const connection = this.#requireLongPollingConnection(
+        readConnectionId(request.params),
+        identity,
+      );
+      connection.identity = identity;
+      let result: LongPollingResult;
+      try {
+        result = await connection.transport.poll(LONG_POLL_TIMEOUT_MS);
+      } catch (error) {
+        if (error instanceof LongPollingBusyError) {
+          throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前连接已有等待中的轮询请求");
+        }
+        throw error;
+      }
+      return reply
+        .header("cache-control", "no-store")
+        .header("x-accel-buffering", "no")
+        .send(roomConnectionPollResponseSchema.parse(result));
+    });
+
+    this.#app.post("/api/v1/room-connections/:connectionId/commands", async (request, reply) => {
+      const identity = requireUnsafeSession(this.#auth, request);
+      const connection = this.#requireLongPollingConnection(
+        readConnectionId(request.params),
+        identity,
+      );
+      connection.identity = identity;
+      connection.transport.touch();
+      await this.#handleMessage(connection, JSON.stringify(request.body));
+      return reply
+        .code(202)
+        .header("cache-control", "no-store")
+        .send(roomConnectionCommandResponseSchema.parse({ accepted: true }));
+    });
+
+    this.#app.delete("/api/v1/room-connections/:connectionId", async (request, reply) => {
+      const identity = requireUnsafeSession(this.#auth, request);
+      const connectionId = readConnectionId(request.params);
+      const connection = this.#connections.get(connectionId);
+      if (connection === undefined) return reply.code(204).send();
+      if (
+        connection.kind !== "long-polling" ||
+        connection.identity.session.id !== identity.session.id
+      ) {
+        throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前会话不能关闭该房间连接");
+      }
+      this.#closeConnection(connection, 1000, "页面已离开");
+      return reply.code(204).send();
+    });
+  }
+
+  #acceptLongPollingConnection(
+    identity: AuthenticatedSession,
+    sessionToken: string,
+  ): LongPollingGatewayConnection {
+    const connectionId = connectionIdSchema.parse(`connection-${ulid()}`);
+    const connection: LongPollingGatewayConnection = {
+      connectionId,
+      identity,
+      kind: "long-polling",
+      rateLimiter: new SlidingWindowRateLimiter({ limit: 60, windowMs: 5_000 }),
+      seenRequests: new Map(),
+      sessionToken,
+      transport: new LongPollingTransport(),
+    };
+    this.#connections.set(connectionId, connection);
+    this.#sendConnectionReady(connection);
+    return connection;
+  }
+
+  #requireLongPollingConnection(
+    connectionId: ConnectionId,
+    identity: AuthenticatedSession,
+  ): LongPollingGatewayConnection {
+    const connection = this.#connections.get(connectionId);
+    if (
+      connection?.kind !== "long-polling" ||
+      connection.identity.session.id !== identity.session.id ||
+      !connection.transport.isOpen
+    ) {
+      throw new HttpError(404, "CONNECTION_NOT_FOUND", "房间连接不存在或已经结束");
+    }
+    return connection;
+  }
+
+  #ensureSiteEnabled(): void {
+    if (!this.#rooms.getSiteStatus().enabled) {
+      throw new HttpError(503, "SITE_DISABLED", "网站正在维护");
     }
   }
 
@@ -173,9 +332,7 @@ export class RoomWebSocketGateway implements RoomPublisher {
       throw new HttpError(401, "AUTH_SESSION_EXPIRED", "登录状态已失效，请重新登录");
     }
     const identity = this.#auth.resolveSession(sessionToken);
-    if (!this.#rooms.getSiteStatus().enabled) {
-      throw new HttpError(503, "SITE_DISABLED", "网站正在维护");
-    }
+    this.#ensureSiteEnabled();
     return { identity, sessionToken };
   }
 
@@ -184,10 +341,11 @@ export class RoomWebSocketGateway implements RoomPublisher {
     authentication: { readonly identity: AuthenticatedSession; readonly sessionToken: string },
   ): void {
     const connectionId = connectionIdSchema.parse(`connection-${ulid()}`);
-    const connection: GatewayConnection = {
+    const connection: WebSocketGatewayConnection = {
       alive: true,
       connectionId,
       identity: authentication.identity,
+      kind: "websocket",
       rateLimiter: new SlidingWindowRateLimiter({ limit: 60, windowMs: 5_000 }),
       seenRequests: new Map(),
       sessionToken: authentication.sessionToken,
@@ -217,9 +375,17 @@ export class RoomWebSocketGateway implements RoomPublisher {
       this.#app.log.debug({ connectionId, err: error }, "websocket connection error");
     });
 
+    this.#sendConnectionReady(connection);
+  }
+
+  #sendConnectionReady(connection: GatewayConnection): void {
     this.#send(connection, {
       messageId: ulid(),
-      payload: { connectionId, heartbeatIntervalMs: 20_000, pongTimeoutMs: 10_000 },
+      payload: {
+        connectionId: connection.connectionId,
+        heartbeatIntervalMs: 20_000,
+        pongTimeoutMs: 10_000,
+      },
       protocol: 1,
       serverTime: new Date().toISOString(),
       type: "connection.ready",
@@ -286,7 +452,7 @@ export class RoomWebSocketGateway implements RoomPublisher {
       );
       connection.memberId = joined.member.memberId;
       connection.roomId = joined.room.state.roomId;
-      if (connection.socket.readyState !== WebSocket.OPEN) return;
+      if (!this.#isOpen(connection)) return;
       await joined.room.attachConnection(joined.member.memberId, connection.connectionId);
       this.#rooms.confirmMemberAttached(joined.member.memberId);
       this.#sendCommandAck(connection, command.requestId, joined.room, true);
@@ -301,7 +467,7 @@ export class RoomWebSocketGateway implements RoomPublisher {
       const room = this.#rooms.require(binding.roomId);
       connection.memberId = binding.memberId;
       connection.roomId = binding.roomId;
-      if (connection.socket.readyState !== WebSocket.OPEN) return;
+      if (!this.#isOpen(connection)) return;
       await room.resume(
         binding.memberId,
         connection.identity.session.id as import("@tabletop/protocol").SessionId,
@@ -436,7 +602,7 @@ export class RoomWebSocketGateway implements RoomPublisher {
     if (httpError.statusCode >= 500) {
       this.#app.log.error(
         { connectionId: connection.connectionId, err: error },
-        "websocket command failed",
+        "room connection command failed",
       );
     }
     let room: RoomRuntime | undefined;
@@ -465,13 +631,24 @@ export class RoomWebSocketGateway implements RoomPublisher {
   }
 
   #send(connection: GatewayConnection, message: unknown): void {
-    if (connection.socket.readyState !== WebSocket.OPEN) return;
-    connection.socket.send(JSON.stringify(serverMessageSchema.parse(message)));
+    if (!this.#isOpen(connection)) return;
+    const parsed = serverMessageSchema.parse(message);
+    if (connection.kind === "websocket") {
+      connection.socket.send(JSON.stringify(parsed));
+      return;
+    }
+    if (!connection.transport.send(parsed)) {
+      this.#closeConnection(connection, 1013, "客户端接收消息过慢");
+    }
   }
 
   async #handleClose(connection: GatewayConnection): Promise<void> {
+    if (connection.closeHandled) return;
+    connection.closeHandled = true;
     this.#connections.delete(connection.connectionId);
-    if (connection.pongTimer) clearTimeout(connection.pongTimer);
+    if (connection.kind === "websocket" && connection.pongTimer) {
+      clearTimeout(connection.pongTimer);
+    }
     if (connection.roomId && connection.memberId) {
       try {
         const room = this.#rooms.require(connection.roomId);
@@ -486,13 +663,19 @@ export class RoomWebSocketGateway implements RoomPublisher {
 
   #heartbeat(): void {
     for (const connection of this.#connections.values()) {
-      if (connection.socket.readyState !== WebSocket.OPEN) continue;
       try {
         if (!this.#refreshIdentity(connection)) continue;
       } catch (error) {
         this.#handleConnectionFailure(connection, error);
         continue;
       }
+      if (connection.kind === "long-polling") {
+        if (Date.now() - connection.transport.lastActivityAt > LONG_POLL_LEASE_MS) {
+          this.#closeConnection(connection, 1001, "长轮询连接已经超时");
+        }
+        continue;
+      }
+      if (connection.socket.readyState !== WebSocket.OPEN) continue;
       connection.alive = false;
       connection.socket.ping();
       if (connection.pongTimer) clearTimeout(connection.pongTimer);
@@ -509,7 +692,7 @@ export class RoomWebSocketGateway implements RoomPublisher {
       return true;
     } catch (error) {
       if (error instanceof HttpError && error.code === "AUTH_SESSION_EXPIRED") {
-        connection.socket.close(4004, "登录状态已失效");
+        this.#closeConnection(connection, 4004, "登录状态已失效");
         return false;
       }
       throw error;
@@ -519,18 +702,44 @@ export class RoomWebSocketGateway implements RoomPublisher {
   #handleConnectionFailure(connection: GatewayConnection, error: unknown): void {
     this.#app.log.error(
       { connectionId: connection.connectionId, err: error },
-      "websocket message handling failed",
+      "room connection message handling failed",
     );
-    if (connection.socket.readyState !== WebSocket.OPEN) return;
+    if (!this.#isOpen(connection)) return;
     try {
-      connection.socket.close(1011, "房间连接处理失败");
+      this.#closeConnection(connection, 1011, "房间连接处理失败");
     } catch (closeError) {
       this.#app.log.error(
         { connectionId: connection.connectionId, err: closeError },
-        "websocket failure close failed",
+        "room connection failure close failed",
       );
-      connection.socket.terminate();
+      if (connection.kind === "websocket") connection.socket.terminate();
     }
+  }
+
+  #closeConnection(connection: GatewayConnection, code: number, reason: string): void {
+    if (connection.closeHandled) return;
+    if (connection.kind === "websocket") {
+      if (
+        connection.socket.readyState === WebSocket.OPEN ||
+        connection.socket.readyState === WebSocket.CONNECTING
+      ) {
+        connection.socket.close(code, reason.slice(0, 120));
+      }
+      return;
+    }
+    connection.transport.close(code, reason);
+    void this.#handleClose(connection).catch((error: unknown) => {
+      this.#app.log.error(
+        { connectionId: connection.connectionId, err: error },
+        "long-polling close handling failed",
+      );
+    });
+  }
+
+  #isOpen(connection: GatewayConnection): boolean {
+    return connection.kind === "websocket"
+      ? connection.socket.readyState === WebSocket.OPEN
+      : connection.transport.isOpen;
   }
 
   #rememberRequest(connection: GatewayConnection, requestId: RequestId): void {
@@ -556,4 +765,12 @@ function parseCookies(header: string | undefined): Record<string, string> {
     }
   }
   return result;
+}
+
+function readConnectionId(params: unknown): ConnectionId {
+  const value =
+    typeof params === "object" && params !== null && "connectionId" in params
+      ? params.connectionId
+      : undefined;
+  return connectionIdSchema.parse(value);
 }
