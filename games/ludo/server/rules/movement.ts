@@ -112,9 +112,11 @@ export function resolvePlaneAction(
   if (!isPlaneInMainPath(plane)) return steps;
 
   let jumped = false;
-  const firstJump = tryJump(state, plane, steps);
-  jumped = firstJump.succeeded;
-  if (!isPlaneInMainPath(plane)) return steps;
+  if (!isFlightEntry(plane.position.pathIndex)) {
+    const firstJump = tryJump(state, plane, steps);
+    jumped = firstJump.succeeded;
+    if (!isPlaneInMainPath(plane)) return steps;
+  }
 
   let flew = false;
   if (isFlightEntry(plane.position.pathIndex)) {
@@ -139,12 +141,7 @@ export function resolvePlaneAction(
     settleCollision(state, plane, steps);
   }
 
-  if (flew && !jumped && isPlaneInMainPath(plane)) {
-    const secondJump = tryJump(state, plane, steps);
-    jumped = secondJump.succeeded;
-  }
-
-  void jumped;
+  if (flew && !jumped && isPlaneInMainPath(plane)) tryJump(state, plane, steps);
   return steps;
 }
 

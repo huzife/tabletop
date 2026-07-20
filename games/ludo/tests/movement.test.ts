@@ -188,7 +188,7 @@ describe("ludo authoritative movement", () => {
     });
   });
 
-  it("flies across stacks and may jump afterward when the first jump was cancelled", () => {
+  it("flies first and then jumps when the die move lands directly on a flight entry", () => {
     const state = createTwoPlayerState();
     setPlane(state, planeId("red", 1), { region: "MAIN_PATH", pathIndex: 16 });
     setPlaneOnGlobalMain(state, planeId("yellow", 1), 19);
@@ -196,13 +196,7 @@ describe("ludo authoritative movement", () => {
 
     const steps = resolvePlaneAction(state, planeId("red", 1), 1);
 
-    expect(steps.map((step) => step.type)).toEqual([
-      "move",
-      "jump_cancelled",
-      "fly",
-      "fly",
-      "jump",
-    ]);
+    expect(steps.map((step) => step.type)).toEqual(["move", "fly", "fly", "jump"]);
     expect(state.planes.find((plane) => plane.planeId === planeId("red", 1))?.position).toEqual({
       region: "MAIN_PATH",
       pathIndex: 33,

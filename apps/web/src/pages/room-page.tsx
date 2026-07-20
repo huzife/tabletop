@@ -16,10 +16,8 @@ import {
   Crown,
   Eye,
   LogOut,
-  MessageSquare,
   Play,
   RefreshCw,
-  Send,
   Settings2,
   UserMinus,
   UserRound,
@@ -31,6 +29,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router";
 
 import { useAuth } from "../auth";
 import { GameMark } from "../components/game-mark";
+import { RoomChat } from "../components/room-chat";
 import { webGameRegistry } from "../games/registry";
 import { useGames } from "../hooks/use-lobby";
 import {
@@ -86,7 +85,6 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
   const [entry] = useState<RoomEntryContext>(() => captureRoomEntryContext(roomId, location.state));
   const socket = useRoomSocket(roomId, entry.joinTicket);
   const gamesQuery = useGames();
-  const [messageDraft, setMessageDraft] = useState("");
   const [copied, setCopied] = useState(false);
   const [localNotice, setLocalNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -264,12 +262,9 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
     });
   }
 
-  function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const text = messageDraft.trim();
-    if (!text || !connected || payload?.permissions.canSendChat !== true) return;
-    const requestId = socket.sendCommand({ payload: { text }, type: "chat.send" });
-    if (requestId !== null) setMessageDraft("");
+  function sendMessage(text: string): boolean {
+    if (!connected || payload?.permissions.canSendChat !== true) return false;
+    return socket.sendCommand({ payload: { text }, type: "chat.send" }) !== null;
   }
 
   function dispatchGameAction(action: JsonObject & { readonly type: string }) {
@@ -758,53 +753,11 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
           </div>
         </section>
 
-        <aside aria-label="房间聊天" className="room-chat">
-          <div className="panel-heading">
-            <div>
-              <span className="panel-kicker">房间</span>
-              <h2>聊天</h2>
-            </div>
-            <MessageSquare size={19} />
-          </div>
-          <div aria-live="polite" className="message-list">
-            {payload.chat.length > 0 ? (
-              payload.chat.map((message) => (
-                <article className="chat-message" key={message.messageId}>
-                  <div>
-                    <strong>{message.senderName}</strong>
-                    <time dateTime={message.sentAt}>{formatChatTime(message.sentAt)}</time>
-                  </div>
-                  <p>{message.text}</p>
-                </article>
-              ))
-            ) : (
-              <div className="chat-empty">还没有聊天消息</div>
-            )}
-          </div>
-          <form className="chat-composer" onSubmit={sendMessage}>
-            <label className="sr-only" htmlFor="chat-message">
-              聊天消息
-            </label>
-            <textarea
-              disabled={!connected || !payload.permissions.canSendChat}
-              id="chat-message"
-              maxLength={500}
-              onChange={(event) => setMessageDraft(event.currentTarget.value)}
-              placeholder="输入消息"
-              rows={3}
-              value={messageDraft}
-            />
-            <div>
-              <span>{messageDraft.length} / 500</span>
-              <IconButton
-                disabled={!connected || !payload.permissions.canSendChat || !messageDraft.trim()}
-                icon={<Send size={18} />}
-                label="发送消息"
-                type="submit"
-              />
-            </div>
-          </form>
-        </aside>
+        <RoomChat
+          canSend={connected && payload.permissions.canSendChat}
+          messages={payload.chat}
+          onSend={sendMessage}
+        />
       </div>
     </div>
   );
@@ -824,16 +777,6 @@ function formatSocketError(
     return gameModule.formatRuleError(ruleCode, error.details);
   }
   return error.message;
-}
-
-function formatChatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("zh-CN", {
-    hour: "2-digit",
-    hour12: false,
-    minute: "2-digit",
-  }).format(date);
 }
 
 async function copyText(value: string): Promise<boolean> {
