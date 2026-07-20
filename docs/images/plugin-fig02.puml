@@ -1,0 +1,23 @@
+@startuml
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam backgroundColor white
+skinparam shadowing false
+
+state "房间大厅" as Lobby
+state "开局校验" as Validate
+state "单局运行中" as Running
+state "游戏已结束" as Ended
+state "房间已销毁" as Destroyed
+
+[*] --> Lobby : 创建房间并校验设置
+Lobby --> Validate : 房主开始
+Validate --> Lobby : 人数 / 准备 / 设置不满足
+Validate --> Running : createMatch\n生成新 matchId
+Running --> Running : handleAction / handleDeadline\nprojectView
+Running --> Ended : 插件返回 outcome
+Ended --> Lobby : 玩家重新准备\n保留成员，不保留旧状态
+Lobby --> Destroyed : 最后真人离开 / 服务关闭
+Running --> Destroyed : 服务关闭 / 插件不可恢复异常
+Ended --> Destroyed : 最后真人离开 / 服务关闭
+Destroyed --> [*]
+@enduml

@@ -1,0 +1,30 @@
+@startuml
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam backgroundColor white
+skinparam shadowing false
+
+state "投骰决定先手" as Decide
+state "等待投骰" as Roll
+state "服务端生成骰子" as Dice <<choice>>
+state "等待选择飞机" as Select
+state "结算移动与自动效果" as Resolve
+state "三六爆机" as TripleSix
+state "写入名次" as Rank
+state "对局结束" as Ended
+
+[*] --> Decide
+Decide --> Decide : 最高点并列者重投
+Decide --> Roll : 唯一最高者成为先手\n正式重新投骰
+Roll --> Dice : 玩家投骰或阶段超时自动投骰
+Dice --> TripleSix : 第三个连续 6\n不允许移动
+Dice --> Select : 有至少一个合法选择
+Dice --> Resolve : 没有合法飞机
+Select --> Resolve : 玩家 / AI / 超时选择一架
+Resolve --> Rank : 当前玩家四架全部完成
+Resolve --> Roll : 点数为第 1 或第 2 个连续 6\n仍由当前玩家投骰
+Resolve --> Roll : 轮到下一名未完成玩家
+TripleSix --> Roll : 全部未完成飞机回基地\n轮到下一名玩家
+Rank --> Ended : 只剩最后一名未完成玩家
+Rank --> Roll : 继续下一名玩家
+Ended --> [*]
+@enduml

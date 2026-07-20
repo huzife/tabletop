@@ -1,0 +1,11 @@
+.git
+node_modules
+dist
+coverage
+docs
+playwright-report
+test-results
+docs/images/*.png
+docs/games/images/*.png
+pnpm-lock.yaml
+packages/database/drizzle/meta/*.json

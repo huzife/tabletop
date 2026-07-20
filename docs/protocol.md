@@ -1,0 +1,284 @@
+# Tabletop HTTP 与实时协议设计
+
+> 状态：已实现的协议 v1 基线
+> 协议版本：v1
+> 传输：HTTP/JSON + WebSocket/JSON
+
+## 1. 设计原则
+
+协议负责可靠地表达账号、房间和游戏意图，不泄漏游戏内部状态。首期使用 JSON，原因是消息规模小、调试直接、TypeScript 校验方便；未来如有高频实时游戏，可以在新协议版本中为特定载荷增加二进制编码。
+
+关键原则如下：
+
+- HTTP 处理低频资源与管理操作，WebSocket 处理房间成员、聊天和游戏实时命令。
+- 会话身份来自 Cookie，不允许客户端声明账号或角色。
+- 每条写命令有唯一 `requestId`，每个房间状态有单调递增 `revision`。
+- 服务端成功处理后返回带 `stateChanged` 的确认；状态变化时再发送按接收者投影的完整快照，展示事件只辅助动画。
+- 刷新或重连不补发所有历史动作，直接用最新快照恢复。
+- 密码和邀请令牌先换取短期 join ticket，不直接进入游戏动作协议。
+
+## 2. HTTP 通用约定
+
+所有 API 使用 `/api/v1` 前缀和 UTF-8 JSON。成功响应返回明确资源，失败响应使用统一结构：
+
+```json
+{
+  "error": {
+    "code": "AUTH_INVALID_CREDENTIALS",
+    "message": "用户名或密码错误",
+    "requestId": "01J...",
+    "details": {}
+  }
+}
+```
+
+`code` 是客户端分支依据，`message` 是可展示的中文默认文案，`details` 只包含安全公开的字段错误。服务端异常栈和数据库信息不得进入响应。
+
+服务端为每个 HTTP 请求生成 ULID，并通过响应头 `X-Request-Id` 返回以关联日志。带 JSON 请求体的接口使用 `Content-Type: application/json`，Fastify 请求体上限为 64 KiB；返回 `204` 的无体接口不要求伪造空 JSON。
+
+认证使用 `tt_session` HttpOnly Cookie。除登录外的认证写接口同时校验同源 Origin、非 HttpOnly `tt_csrf` Cookie 与 `X-CSRF-Token` 请求头；Cookie 和请求头必须相同，并与当前会话保存的哈希匹配。认证会话、目录、列表、后台读取和审计导出等响应设置 `Cache-Control: no-store`，客户端也不得缓存账号或服务状态。
+
+## 3. 认证与会话 API
+
+| 方法与路径 | 身份 | 用途 |
+| --- | --- | --- |
+| `POST /api/v1/auth/login` | 匿名 | 用户名、密码登录并创建设备会话 |
+| `POST /api/v1/auth/logout` | 登录 | 撤销当前会话并清除 Cookie |
+| `GET /api/v1/auth/session` | 登录 | 返回当前账号、角色、会话过期时间 |
+| `POST /api/v1/auth/change-password` | 登录 | 校验当前密码并修改，撤销其他会话 |
+
+登录成功设置随机会话 Cookie。Cookie 原值只保存在浏览器，SQLite 保存由 `SESSION_SECRET` 参与计算的 HMAC-SHA-256 摘要；每次请求计算摘要后查找有效会话。CSRF 摘要使用同一密钥，轮换密钥会使全部旧会话和 CSRF 值失效。会话滑动续期在距离 `last_seen_at` 满 24 小时后才写入一次，并把 `expiresAt` 延长到当前时间后的 30 天，避免每个 HTTP 请求写数据库。
+
+登录错误统一返回相同文案，不暴露用户名是否存在。限流同时考虑来源 IP 和规范化用户名；成功登录不会把失败计数写入审计以外的长期用户数据。
+
+## 4. 游戏和房间 HTTP API
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /api/v1/games` | 返回编译注册游戏、manifest 摘要、公开 `botProfiles` 和启停状态 |
+| `GET /api/v1/rooms` | 返回公开房间摘要，支持 `gameId`、状态和可加入性筛选 |
+| `POST /api/v1/rooms` | 创建房间，校验游戏启用、名称、密码和游戏设置 |
+| `POST /api/v1/rooms/:roomId/join-ticket` | 从房间列表进入；校验可选密码并签发 ticket |
+| `POST /api/v1/invites/:inviteToken/join-ticket` | 从邀请链接进入；绕过房间密码并签发 ticket |
+
+房间创建响应同时返回 `roomId`、邀请链接和创建者的短期 join ticket。普通房间进入 ticket 默认 30 秒过期、单次使用，并绑定 `sessionId`、`roomId` 和进入来源。创建者从未连接且 ticket 到期时，平台通过房间队列移除该成员：没有其他真人则销毁房间，已有访客则转移房主并保留房间。ticket 只用于建立房间成员身份，不能替代登录会话。
+
+邀请令牌使用至少 128 位不可预测随机值。邀请 URL 泄露等价于绕过房间密码，但访问者仍必须登录；房间销毁后令牌失效。
+
+游戏目录中的每个 `botProfiles` 项包含 `profileId`、`displayName`、`description` 和服务端硬预算 `timeBudgetMs`。该数组只描述房主可添加的 AI；断线/超时兜底控制器不进入目录。没有可配置 AI 的游戏返回空数组。
+
+当前请求与响应的关键字段如下：
+
+- `POST /api/v1/rooms` 接收 `gameId`、1～30 字符的 `name`、可选 `password`、插件 `settings`、默认 `false` 的 `practice`，以及仅供练习房使用的可选 `botProfileId`；响应返回 `roomId`、`inviteUrl`、`joinTicket` 与 `joinTicketExpiresAt`，并显式设置 `Cache-Control: no-store`。
+- `GET /api/v1/rooms` 可按 `gameId`、`status` 和 `joinable` 查询；摘要包含房主名、已占座位数、最大玩家数、观众数、观众上限、状态、密码标记和可加入标记。
+- 房间列表 join-ticket API 接收可选 `password` 或空对象；邀请 join-ticket API 不需要业务请求体。两者统一返回 `roomId`、`joinTicket` 和 `expiresAt`。
+
+## 5. 管理 API
+
+| 方法与路径 | 用途 |
+| --- | --- |
+| `GET /api/v1/admin/accounts` | 分页、筛选普通账号 |
+| `POST /api/v1/admin/accounts` | 创建账号并设置初始密码 |
+| `PATCH /api/v1/admin/accounts/:accountId` | 启用或禁用账号 |
+| `POST /api/v1/admin/accounts/:accountId/reset-password` | 设置新密码并撤销全部会话 |
+| `DELETE /api/v1/admin/accounts/:accountId` | 仅在账号离线且不属于任何房间时删除 |
+| `GET /api/v1/admin/services` | 读取全站及各游戏启停状态 |
+| `PUT /api/v1/admin/services/site` | 立即开启或关闭全站 |
+| `PUT /api/v1/admin/services/games/:gameId` | 立即开启或关闭单游戏 |
+| `GET /api/v1/admin/audit` | 按时间、账号和操作筛选审计日志 |
+| `GET /api/v1/admin/audit.csv` | 导出当前筛选条件对应的 CSV |
+
+管理 API 不提供房间列表、房间详情、对局状态或强制房间操作。关闭服务由内部服务管理器遍历并终止受影响房间，这一内部行为不会暴露成通用房间后台。
+
+所有管理写接口需要管理员角色与 CSRF 防护，并在同一数据库事务中写入操作结果和审计记录。导出 CSV 时对以 `= + - @` 开头的文本做转义，避免电子表格公式注入。
+
+## 6. WebSocket 建连
+
+客户端使用当前站点的 `/ws?protocol=1` 建立连接，浏览器自动携带会话 Cookie。服务端按以下顺序处理：
+
+1. 校验 Origin、协议版本、会话和全站状态。
+2. 分配 `connectionId`，加载 `accountId` 与 `sessionId`。
+3. 发送 `connection.ready`，包含服务端 UTC 时间和心跳参数。
+4. 客户端使用 join ticket 提交 `room.join`，或在重连时提交原房间恢复信息。
+5. 服务端建立成员绑定后发送完整 `room.snapshot`。
+
+升级握手后，每个客户端帧先经过纯内存连接限流，再重新验证会话，最后执行 JSON、Zod 和房间命令处理；心跳也会周期重验会话。这样注销、改密、管理员重置或自然过期会关闭已有 WebSocket，同时超限帧不会先触发数据库查询。
+
+心跳由服务端每 20 秒发 WebSocket ping，10 秒内没有 pong 则关闭连接并触发断线处理。当前房间页面为该页面生命周期建立一条活动连接；离开页面会关闭连接，重新进入或网络中断后创建新连接。
+
+## 7. 消息信封
+
+客户端命令使用以下通用信封：
+
+```ts
+interface ClientCommand<TPayload> {
+  protocol: 1;
+  requestId: string;
+  type: string;
+  roomId?: string;
+  matchId?: string;
+  expectedRevision?: number;
+  payload: TPayload;
+}
+```
+
+`requestId` 使用 UUID 或 ULID，在一次用户意图的重试中保持不变。游戏命令必须带 `roomId`、`matchId` 和 `expectedRevision`；纯连接或首次进房命令可以省略相应字段。
+
+服务端事件使用对称信封：
+
+```ts
+interface ServerMessage<TPayload> {
+  protocol: 1;
+  messageId: string;
+  type: string;
+  roomId?: string;
+  matchId?: string;
+  revision?: number;
+  causedBy?: string;
+  serverTime: string;
+  payload: TPayload;
+}
+```
+
+`causedBy` 指向客户端 `requestId`，便于客户端结束提交状态。当前 `command.ack` 和 `command.error` 必须携带该字段，`room.snapshot` 可以省略；没有客户端来源的计时、AI 和服务关闭消息不设置该字段。
+
+## 8. 客户端命令
+
+### 8.1 通用房间命令
+
+| 类型 | 主要载荷 | 说明 |
+| --- | --- | --- |
+| `room.join` | `joinTicket` | 首次建立房间成员身份，普通加入默认为观众 |
+| `room.resume` | `roomId` | 当前会话在 30 秒窗口内恢复，或完成已预绑定但从未 attach 的首次连接 |
+| `room.leave` | 空 | 主动离开，不进入重连窗口 |
+| `room.rename` | `name` | 房主修改房间名，有效长度 1～30 个 Unicode 字符 |
+| `room.settings.update` | `settings` | 房主在允许阶段修改游戏设置 |
+| `room.seat.claim` | `seatId` | 观众在非对局阶段占据空座；不能直接替换 AI |
+| `room.seat.reclaim` | `seatId` | 当插件投影声明允许时，请求取回由自动控制器管理且为当前账号保留的座位 |
+| `room.seat.release` | 空 | 开局前释放自己的座位 |
+| `room.bot.add` | `seatId`, `profileId` | 房主向空座添加 AI |
+| `room.bot.remove` | `seatId` | 房主在开局前移除 AI |
+| `room.ready.set` | `ready` | 真人设置准备状态 |
+| `room.host.transfer` | `accountId` | 主动转移给房间内真人 |
+| `room.member.kick` | `memberId` | 按阶段限制踢未开局玩家或观众 |
+| `room.match.start` | 空 | 房主在开始条件满足时开始 |
+| `chat.send` | `text` | 发送纯文本消息 |
+
+公共命令由房间核心处理。插件可以提供座位显示信息和开始条件补充，但不能绕过房主、成员和设备权限。
+
+`room.rename`、设置、座位、AI、准备、房主转移、踢人和开局命令都在信封顶层要求 `roomId` 与 `expectedRevision`。`room.leave` 和 `chat.send` 只要求 `roomId`；`room.join` 不带顶层房间 ID，`room.resume` 把 `roomId` 放在 payload 中。
+
+### 8.2 游戏命令
+
+所有游戏动作使用 `game.action`，载荷由对应插件 schema 判定：
+
+```json
+{
+  "protocol": 1,
+  "requestId": "01J...",
+  "type": "game.action",
+  "roomId": "room-...",
+  "matchId": "match-...",
+  "expectedRevision": 42,
+  "payload": {
+    "type": "turn.choose",
+    "optionId": "option-3"
+  }
+}
+```
+
+示例表示浏览器基于修订号 42 提交一个插件定义的选择。服务端仍会从连接身份确定座位，并把不透明载荷交给对应插件 schema 与规则验证；如果插件返回 `applied`，房间产生修订号 43；若返回 `noop`，修订号保持 42 且 ack 的 `stateChanged` 为 `false`。修改 JSON 中任何字段都不能获得其他座位权限。
+
+## 9. 服务端消息
+
+### 9.1 当前网关发送的消息
+
+| 类型 | 用途 |
+| --- | --- |
+| `connection.ready` | 建连完成与心跳参数 |
+| `command.ack` | 命令成功确认；`payload.stateChanged` 表示是否改变房间状态 |
+| `command.error` | 稳定错误码、公开参数和是否应重新同步 |
+| `room.snapshot` | 当前接收者的完整房间、聊天和游戏投影视图 |
+| `room.closed` | 服务关闭、最后真人离开或内部错误导致房间终止 |
+
+每个成功命令都产生 `command.ack`，其中 `causedBy` 等于请求的 `requestId`，`stateChanged` 为布尔值；状态变化还会向在线成员广播接收者专属的 `room.snapshot`。客户端不能把“收到快照”当作唯一成功确认，也不能把 `stateChanged: false` 当作失败。
+
+`room.snapshot` 信封携带 `roomId`、可选 `matchId` 和 `revision`；payload 包含游戏 ID、公共房间信息、成员与连接状态、座位与控制器、房主、准备状态、最近 100 条聊天、游戏设置、当前接收者的 `gameView`、通用房间权限和本次 `displayEvents`。观众通过 `members[].role = "spectator"` 表达，不存在第二份观众列表。`room.seat.reclaim` 等可选命令必须由快照权限显式开放。
+
+展示事件只在造成它们的最新快照中发送。重连快照可以没有历史展示事件，客户端直接呈现最终局面，避免重播断线期间所有动画。
+
+### 9.2 已定义但尚未由网关发送的预留消息
+
+`packages/protocol/src/ws/server-messages.ts` 已为 `room.connection.changed` 和 `service.status.changed` 保留 v1 schema，但当前 `RoomWebSocketGateway` 不发送这两类消息，它们不属于首期客户端必须依赖的行为：
+
+- 成员的 `connected`、`reconnecting`、`offline`、`reconnectUntil` 和座位控制器变化以 `room.snapshot` 为准。
+- 服务关闭通过受影响连接的 `room.closed` 表达；目录或后台页面通过 HTTP 重新读取全站/单游戏开关。
+
+后续若启用预留消息，只能作为降低刷新延迟的提示，不能取代快照和 HTTP 的权威状态；启用前需要补充网关发送测试和客户端处理测试。
+
+## 10. 动作时序与原子性
+
+下图展示正常游戏动作、重复请求和过期修订号的处理位置。
+
+![图10-1 WebSocket 命令处理时序](images/protocol-fig01.png)
+
+网关在连接限流、会话重验和完整解析后记录 `receivedAtMonotonic`。房间计时裁决使用这个接收时间，而不是异步队列真正开始执行的时间，避免服务器短暂排队让玩家无故超时。
+
+网关与每房命令队列处理动作时：
+
+1. 网关在当前 WebSocket 连接的最近请求缓存中查找 `requestId`。
+2. 同一连接内的重复请求不重复迁移状态；已绑定房间时重发当前快照。缓存会在首次解析后、执行前记录该 ID，因此同一连接上重试失败命令也必须使用新 `requestId`。
+3. 校验房间、对局和预期修订号。
+4. 校验连接控制权，再调用平台命令或游戏插件。
+5. 若命令或插件转换实际改变状态，则原子替换状态并递增修订号；`noop` 保持原修订号。
+6. 状态变化时为每个接收者生成新投影并发送快照，并向发起连接发送带 `stateChanged` 的成功 ack。
+
+当前每条 WebSocket 连接保留最近 128 个 `requestId`，连接关闭后缓存随之释放。跨重连不能依靠旧连接缓存去重，因此可并发修改的房间命令使用 `expectedRevision`，游戏动作同时带 `matchId`；客户端不会自动重放无法确认是否生效的危险动作。
+
+## 11. 重连协议
+
+断线时原 `sessionId` 的成员和座位恢复信息保存在房间内存中。房间队列同时向插件提交 `connection.lost` 系统事件；插件可以请求临时自动控制，也可以选择其他自身支持的状态变化。浏览器自动重连 WebSocket 后发送 `room.resume`，服务端必须确认账号、原会话、房间和仍有效的恢复窗口匹配。若首次 join 是否送达无法确认，已预绑定但从未 attach 的原会话也可以 resume；这种情况只完成连接，不发送 `connection.restored` 游戏系统事件，并取消尚存的创建 ticket 定时器。
+
+![图11-1 断线、可选临时接管与快照恢复时序](images/protocol-fig02.png)
+
+临时控制器是插件系统事件返回的通用房间指令，不依赖客户端计时。重连成功后平台向插件提交 `connection.restored`，并按插件结果调整后续控制权；断线期间已经提交的合法动作不会自动撤销。30 秒到期命令同样通过房间队列，并比较成员状态和原 `reconnectUntil`，避免旧任务误触发。
+
+窗口到期后，平台把成员标记为 `offline`、释放该 `sessionId` 的活动房间绑定，并向插件提交 `connection.grace_expired`。插件可以返回比赛结果、控制器变化、座位释放或允许后续取回等通用指令。平台随后执行以下与具体游戏无关的成员处理：
+
+- 没有关联座位的离线观众从成员表删除；如果没有任何真人成员，房间销毁。
+- 仍有关联座位的成员可以留在成员表。原 `sessionId` 之后通过新的 join ticket 加入同一房间时复用原 `memberId`，不会创建重复成员或重复座位归属。
+- 到期成员是房主时，平台把房主转给最早加入且当前已连接的其他真人成员；若当时没有这样的成员，则暂留原房主身份，并在之后有成员连接或恢复时再次转移。
+
+若插件允许手动取回，客户端只有在快照 `permissions.reclaimableSeatIds` 包含目标座位后才能发送 `room.seat.reclaim`；平台校验账号、成员和座位所有权，再把请求作为 `seat.reclaim_requested` 系统事件交给插件。新会话或同账号的另一设备不属于 `room.resume`，只能按普通加入与取回权限行动。协议不规定任何具体游戏选择哪种比赛结果。
+
+## 12. 错误分类
+
+| 前缀 | 示例 | 客户端处理 |
+| --- | --- | --- |
+| `AUTH_` | `AUTH_SESSION_EXPIRED` | 返回登录并保留安全跳转目标 |
+| `SITE_` | `SITE_DISABLED` | 显示维护页 |
+| `GAME_SERVICE_` | `GAME_SERVICE_DISABLED` | 返回首页并刷新游戏目录 |
+| `ROOM_` | `ROOM_FULL`、`ROOM_PASSWORD_INVALID` | 留在加入流程并提示 |
+| `CONNECTION_` | `CONNECTION_ROOM_CONFLICT` | 显示其他设备/房间冲突 |
+| `REVISION_` | `REVISION_STALE` | 请求最新快照，不自动重放危险动作 |
+| `GAME_` | `GAME_ILLEGAL_ACTION` | 恢复按钮状态并展示插件文案 |
+| `RATE_` | `RATE_CHAT_LIMIT` | 暂时禁用发送并显示剩余时间 |
+| `INTERNAL_` | `INTERNAL_ROOM_ABORTED` | 停止当前操作并给出请求 ID；只有 `room.closed` 才表示房间已终止 |
+
+错误信息不得泄漏密码是否正确之外的内部比较细节、邀请令牌、会话值、其他玩家隐藏状态和异常栈。
+
+## 13. 限制与背压
+
+- 单条客户端 WebSocket 消息最大 64 KiB；超出直接关闭连接。
+- 聊天单条 500 字，每会话每 5 秒最多 10 条。
+- 每个 WebSocket 连接每 5 秒最多接收 60 条命令；聊天还受上述更严格的独立限制。
+- 建房每会话每分钟最多 5 次；join ticket 每会话每分钟最多 30 次，其中房间密码校验最多 10 次。
+- 房间密码 Argon2id 最多并行 2 个任务，额外等待队列最多 16 个；超出后返回 `RATE_ROOM_LIMIT`。
+- 游戏投影的设计目标小于 256 KiB；当前服务端不对单份出站快照另设协议级硬上限，插件必须在测试中控制投影规模。
+- 客户端对同类状态变更只保留一个待确认动作，直到收到 `command.ack`、`command.error` 或更新快照。
+
+## 14. 协议版本演进
+
+HTTP 使用路径主版本，WebSocket 在握手和每条信封中携带主版本。当前 Zod 信封是严格 schema，网页遇到未知字段或未知消息类型会以协议错误关闭连接；因此 v1 增加字段或消息时必须同时更新服务端 schema、浏览器 bundle 和兼容测试，不能假设旧客户端会静默忽略。
+
+主版本不兼容时，服务端拒绝握手并返回支持版本。由于网页与服务端同次部署，正常用户会通过刷新获得匹配 bundle；版本机制主要用于缓存页面、部署切换和后续原生客户端可能性。

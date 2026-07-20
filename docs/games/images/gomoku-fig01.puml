@@ -1,0 +1,25 @@
+@startuml
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam backgroundColor white
+skinparam shadowing false
+
+state "对局进行中" as Playing
+state "悔棋等待回应" as UndoPending
+state "对局结束" as Ended
+
+[*] --> Playing : createMatch\n随机黑方并启动棋钟
+Playing --> Playing : 合法落子\n换手并 revision + 1
+Playing --> UndoPending : 上一步玩家申请悔棋\n冻结棋钟
+UndoPending --> Playing : 拒绝或 30 秒超时\n恢复对方棋钟
+UndoPending --> Playing : 同意\n删除申请者最后一步并轮到申请者
+Playing --> Ended : 五连 / 满盘和棋
+Playing --> Ended : 认输 / 超时 / 主动退出
+Playing --> Ended : 对方接受和棋
+Ended --> [*] : 返回房间结算状态
+
+note right of Playing
+  和棋提议不改变主阶段，
+  不暂停棋钟；对方落子
+  会自动关闭未回应提议。
+end note
+@enduml

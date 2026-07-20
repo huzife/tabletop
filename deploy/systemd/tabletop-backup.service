@@ -1,0 +1,32 @@
+[Unit]
+Description=Back up the Tabletop SQLite database
+ConditionPathExists=/var/lib/tabletop/tabletop.db
+
+[Service]
+Type=oneshot
+User=tabletop
+Group=tabletop
+WorkingDirectory=/opt/tabletop/current
+EnvironmentFile=/etc/tabletop/tabletop.env
+Environment=BACKUP_DIR=/var/backups/tabletop
+ExecStart=/opt/tabletop/current/scripts/backup-db.sh --label daily
+TimeoutStartSec=5min
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tabletop /var/backups/tabletop
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+
+SyslogIdentifier=tabletop-backup

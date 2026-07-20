@@ -1,0 +1,37 @@
+@startuml
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam backgroundColor white
+skinparam shadowing false
+autonumber
+
+actor 玩家
+participant 浏览器
+participant "WebSocket 网关" as Gateway
+participant "请求结果缓存" as Cache
+participant "房间队列" as Queue
+participant "游戏插件" as Plugin
+collections "接收者" as Peers
+
+玩家 -> 浏览器 : 执行动作
+浏览器 -> Gateway : ClientCommand\nrequestId / matchId / revision
+Gateway -> Cache : 查询 sessionId + requestId
+
+alt 已处理的重复请求
+  Cache --> Gateway : 已有结果
+  Gateway --> 浏览器 : 重发确认或当前快照
+else 新请求
+  Cache --> Gateway : 未命中
+  Gateway -> Queue : 命令 + receivedAt
+  alt 修订号过期或无控制权
+    Queue --> Gateway : command.error\nrequiresResync=true
+    Gateway --> 浏览器 : 错误 + 最新快照
+  else 校验通过
+    Queue -> Plugin : handleAction
+    Plugin --> Queue : transition
+    Queue -> Queue : 提交状态，revision + 1
+    Queue -> Cache : 缓存处理结果
+    Queue -> Peers : 各自 room.snapshot
+    Peers --> 浏览器 : causedBy=requestId
+  end
+end
+@enduml

@@ -1,0 +1,37 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.turbo/
+.vite/
+playwright-report/
+test-results/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+backups/
+*.pid
+
+# Editor and operating-system files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+tmp/
+.cache/
+__pycache__/
+*.pyc

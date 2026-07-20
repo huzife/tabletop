@@ -1,0 +1,50 @@
+[Unit]
+Description=Tabletop web game server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tabletop
+Group=tabletop
+WorkingDirectory=/opt/tabletop/current
+EnvironmentFile=/etc/tabletop/tabletop.env
+Environment=NODE_OPTIONS=--max-old-space-size=1024
+ExecStartPre=/usr/bin/test -r /opt/tabletop/current/apps/server/dist/main.js
+ExecStartPre=/usr/bin/test -r /opt/tabletop/current/apps/web/dist/index.html
+ExecStart=/usr/bin/node /opt/tabletop/current/apps/server/dist/main.js
+Restart=on-failure
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
+KillSignal=SIGTERM
+UMask=0077
+
+RuntimeDirectory=tabletop
+RuntimeDirectoryMode=0750
+StateDirectory=tabletop
+StateDirectoryMode=0750
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/tabletop
+CapabilityBoundingSet=
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+
+LimitNOFILE=65536
+TasksMax=64
+MemoryHigh=1100M
+MemoryMax=1400M
+
+SyslogIdentifier=tabletop
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,208 @@
+:root {
+  --ui-accent: #13795b;
+  --ui-accent-hover: #0f684d;
+  --ui-danger: #b42318;
+  --ui-text: #202522;
+  --ui-muted: #68716c;
+  --ui-border: #d8ded9;
+  --ui-surface: #ffffff;
+  --ui-focus: #8bcbb7;
+}
+
+.ui-button,
+.ui-icon-button,
+.ui-field__input {
+  font: inherit;
+}
+
+.ui-button {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 650;
+  gap: 8px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.ui-button:focus-visible,
+.ui-icon-button:focus-visible,
+.ui-field__input:focus-visible {
+  outline: 3px solid var(--ui-focus);
+  outline-offset: 2px;
+}
+
+.ui-button:disabled,
+.ui-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.ui-button--primary {
+  background: var(--ui-accent);
+  color: #ffffff;
+}
+
+.ui-button--primary:hover:not(:disabled) {
+  background: var(--ui-accent-hover);
+}
+
+.ui-button--secondary {
+  background: var(--ui-surface);
+  border-color: var(--ui-border);
+  color: var(--ui-text);
+}
+
+.ui-button--secondary:hover:not(:disabled),
+.ui-button--quiet:hover:not(:disabled) {
+  background: #f2f5f3;
+}
+
+.ui-button--danger {
+  background: var(--ui-danger);
+  color: #ffffff;
+}
+
+.ui-button--quiet {
+  background: transparent;
+  color: var(--ui-text);
+}
+
+.ui-icon-button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ui-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 38px;
+  justify-content: center;
+  padding: 0;
+  width: 38px;
+}
+
+.ui-icon-button:hover:not(:disabled) {
+  background: #edf1ee;
+  color: var(--ui-text);
+}
+
+.ui-icon-button--danger:hover:not(:disabled) {
+  background: #fff0ef;
+  color: var(--ui-danger);
+}
+
+.ui-badge {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 22px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.ui-badge--neutral {
+  background: #edf1ee;
+  color: #4d5651;
+}
+
+.ui-badge--success {
+  background: #dff5e9;
+  color: #17633f;
+}
+
+.ui-badge--warning {
+  background: #fff1c2;
+  color: #755500;
+}
+
+.ui-badge--danger {
+  background: #fee4e2;
+  color: #912018;
+}
+
+.ui-badge--info {
+  background: #e2efff;
+  color: #175b9c;
+}
+
+.ui-field {
+  display: grid;
+  gap: 6px;
+}
+
+.ui-field__label {
+  color: var(--ui-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.ui-field__input {
+  background: #ffffff;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  color: var(--ui-text);
+  height: 40px;
+  min-width: 0;
+  padding: 0 11px;
+}
+
+.ui-field__input[aria-invalid="true"] {
+  border-color: var(--ui-danger);
+}
+
+.ui-field__error,
+.ui-field__hint {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ui-field__error {
+  color: var(--ui-danger);
+}
+
+.ui-field__hint {
+  color: var(--ui-muted);
+}
+
+.ui-empty-state {
+  align-items: center;
+  color: var(--ui-muted);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 210px;
+  padding: 28px;
+  text-align: center;
+}
+
+.ui-empty-state__icon {
+  align-items: center;
+  background: #edf4f0;
+  border-radius: 50%;
+  color: var(--ui-accent);
+  display: inline-flex;
+  height: 48px;
+  justify-content: center;
+  margin-bottom: 12px;
+  width: 48px;
+}
+
+.ui-empty-state strong {
+  color: var(--ui-text);
+  font-size: 15px;
+}
+
+.ui-empty-state p {
+  margin: 6px 0 16px;
+  max-width: 420px;
+}

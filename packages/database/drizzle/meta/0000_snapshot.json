@@ -1,0 +1,573 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "1d3d83b5-444b-4ade-bc04-8bbe7787776d",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "accounts": {
+      "name": "accounts",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "username": {
+          "name": "username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "username_normalized": {
+          "name": "username_normalized",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "password_changed_at": {
+          "name": "password_changed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "accounts_username_normalized_unique": {
+          "name": "accounts_username_normalized_unique",
+          "columns": [
+            "username_normalized"
+          ],
+          "isUnique": true
+        },
+        "accounts_single_admin_unique": {
+          "name": "accounts_single_admin_unique",
+          "columns": [
+            "role"
+          ],
+          "isUnique": true,
+          "where": "\"accounts\".\"role\" = 'admin'"
+        },
+        "accounts_status_idx": {
+          "name": "accounts_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "accounts_id_ulid_check": {
+          "name": "accounts_id_ulid_check",
+          "value": "length(\"accounts\".\"id\") = 26"
+        },
+        "accounts_username_length_check": {
+          "name": "accounts_username_length_check",
+          "value": "length(\"accounts\".\"username\") BETWEEN 3 AND 32"
+        },
+        "accounts_username_normalized_length_check": {
+          "name": "accounts_username_normalized_length_check",
+          "value": "length(\"accounts\".\"username_normalized\") BETWEEN 3 AND 32"
+        },
+        "accounts_password_hash_not_empty_check": {
+          "name": "accounts_password_hash_not_empty_check",
+          "value": "length(\"accounts\".\"password_hash\") > 0"
+        },
+        "accounts_role_check": {
+          "name": "accounts_role_check",
+          "value": "\"accounts\".\"role\" IN ('admin', 'user')"
+        },
+        "accounts_status_check": {
+          "name": "accounts_status_check",
+          "value": "\"accounts\".\"status\" IN ('enabled', 'disabled')"
+        }
+      }
+    },
+    "audit_logs": {
+      "name": "audit_logs",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_account_id": {
+          "name": "actor_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "actor_username": {
+          "name": "actor_username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "target_label": {
+          "name": "target_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "result": {
+          "name": "result",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source_ip": {
+          "name": "source_ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "metadata_json": {
+          "name": "metadata_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        }
+      },
+      "indexes": {
+        "audit_logs_created_at_idx": {
+          "name": "audit_logs_created_at_idx",
+          "columns": [
+            "created_at",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "audit_logs_actor_created_at_idx": {
+          "name": "audit_logs_actor_created_at_idx",
+          "columns": [
+            "actor_account_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "audit_logs_action_created_at_idx": {
+          "name": "audit_logs_action_created_at_idx",
+          "columns": [
+            "action",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "audit_logs_target_created_at_idx": {
+          "name": "audit_logs_target_created_at_idx",
+          "columns": [
+            "target_type",
+            "target_id",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "audit_logs_actor_account_id_accounts_id_fk": {
+          "name": "audit_logs_actor_account_id_accounts_id_fk",
+          "tableFrom": "audit_logs",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "actor_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "audit_logs_id_ulid_check": {
+          "name": "audit_logs_id_ulid_check",
+          "value": "length(\"audit_logs\".\"id\") = 26"
+        },
+        "audit_logs_actor_username_not_empty_check": {
+          "name": "audit_logs_actor_username_not_empty_check",
+          "value": "length(\"audit_logs\".\"actor_username\") > 0"
+        },
+        "audit_logs_action_not_empty_check": {
+          "name": "audit_logs_action_not_empty_check",
+          "value": "length(\"audit_logs\".\"action\") > 0"
+        },
+        "audit_logs_target_type_not_empty_check": {
+          "name": "audit_logs_target_type_not_empty_check",
+          "value": "length(\"audit_logs\".\"target_type\") > 0"
+        },
+        "audit_logs_result_check": {
+          "name": "audit_logs_result_check",
+          "value": "\"audit_logs\".\"result\" IN ('success', 'failure')"
+        },
+        "audit_logs_request_id_not_empty_check": {
+          "name": "audit_logs_request_id_not_empty_check",
+          "value": "length(\"audit_logs\".\"request_id\") > 0"
+        },
+        "audit_logs_metadata_json_check": {
+          "name": "audit_logs_metadata_json_check",
+          "value": "json_valid(\"audit_logs\".\"metadata_json\")"
+        }
+      }
+    },
+    "game_service_settings": {
+      "name": "game_service_settings",
+      "columns": {
+        "game_id": {
+          "name": "game_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "game_service_settings_updated_by_accounts_id_fk": {
+          "name": "game_service_settings_updated_by_accounts_id_fk",
+          "tableFrom": "game_service_settings",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "game_service_settings_game_id_length_check": {
+          "name": "game_service_settings_game_id_length_check",
+          "value": "length(\"game_service_settings\".\"game_id\") BETWEEN 1 AND 64"
+        },
+        "game_service_settings_enabled_check": {
+          "name": "game_service_settings_enabled_check",
+          "value": "\"game_service_settings\".\"enabled\" IN (0, 1)"
+        }
+      }
+    },
+    "sessions": {
+      "name": "sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "blob",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "csrf_secret_hash": {
+          "name": "csrf_secret_hash",
+          "type": "blob",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "sessions_token_hash_unique": {
+          "name": "sessions_token_hash_unique",
+          "columns": [
+            "token_hash"
+          ],
+          "isUnique": true
+        },
+        "sessions_account_id_idx": {
+          "name": "sessions_account_id_idx",
+          "columns": [
+            "account_id"
+          ],
+          "isUnique": false
+        },
+        "sessions_expires_at_idx": {
+          "name": "sessions_expires_at_idx",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false
+        },
+        "sessions_revoked_at_idx": {
+          "name": "sessions_revoked_at_idx",
+          "columns": [
+            "revoked_at"
+          ],
+          "isUnique": false,
+          "where": "\"sessions\".\"revoked_at\" IS NOT NULL"
+        }
+      },
+      "foreignKeys": {
+        "sessions_account_id_accounts_id_fk": {
+          "name": "sessions_account_id_accounts_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sessions_id_ulid_check": {
+          "name": "sessions_id_ulid_check",
+          "value": "length(\"sessions\".\"id\") = 26"
+        },
+        "sessions_token_hash_length_check": {
+          "name": "sessions_token_hash_length_check",
+          "value": "length(\"sessions\".\"token_hash\") = 32"
+        },
+        "sessions_csrf_secret_hash_length_check": {
+          "name": "sessions_csrf_secret_hash_length_check",
+          "value": "length(\"sessions\".\"csrf_secret_hash\") = 32"
+        },
+        "sessions_expiry_order_check": {
+          "name": "sessions_expiry_order_check",
+          "value": "\"sessions\".\"expires_at\" > \"sessions\".\"created_at\""
+        }
+      }
+    },
+    "site_settings": {
+      "name": "site_settings",
+      "columns": {
+        "singleton_id": {
+          "name": "singleton_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "maintenance_message": {
+          "name": "maintenance_message",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "site_settings_updated_by_accounts_id_fk": {
+          "name": "site_settings_updated_by_accounts_id_fk",
+          "tableFrom": "site_settings",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "site_settings_singleton_check": {
+          "name": "site_settings_singleton_check",
+          "value": "\"site_settings\".\"singleton_id\" = 1"
+        },
+        "site_settings_enabled_check": {
+          "name": "site_settings_enabled_check",
+          "value": "\"site_settings\".\"enabled\" IN (0, 1)"
+        },
+        "site_settings_maintenance_message_length_check": {
+          "name": "site_settings_maintenance_message_length_check",
+          "value": "length(\"site_settings\".\"maintenance_message\") BETWEEN 1 AND 200"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

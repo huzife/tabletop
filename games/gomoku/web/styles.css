@@ -1,0 +1,479 @@
+.gomoku-game {
+  align-items: stretch;
+  container-type: size;
+  display: grid;
+  gap: clamp(12px, 2.5%, 24px);
+  grid-template-columns: minmax(0, 720px) clamp(220px, 28%, 300px);
+  height: 100%;
+  justify-content: center;
+  max-height: 100%;
+  min-width: 0;
+  padding: 12px;
+  width: 100%;
+}
+
+.gomoku-board-column {
+  align-items: center;
+  display: flex;
+  height: 100%;
+  justify-content: center;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.gomoku-board {
+  aspect-ratio: 1;
+  background: #d9aa63;
+  border: 1px solid #9d713a;
+  box-shadow: 0 8px 24px rgb(59 43 23 / 12%);
+  display: grid;
+  grid-template-columns: repeat(15, minmax(0, 1fr));
+  grid-template-rows: repeat(15, minmax(0, 1fr));
+  height: auto;
+  max-width: 100%;
+  overflow: hidden;
+  padding: clamp(10px, 2.1%, 16px);
+  width: min(100%, 100cqh, 720px);
+}
+
+.gomoku-point {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  cursor: default;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+}
+
+.gomoku-point__horizontal,
+.gomoku-point__vertical {
+  background: #6b4a25;
+  left: 50%;
+  pointer-events: none;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+}
+
+.gomoku-point__horizontal {
+  height: 1px;
+  width: 101%;
+}
+
+.gomoku-point__vertical {
+  height: 101%;
+  width: 1px;
+}
+
+.gomoku-point:nth-child(-n + 15) .gomoku-point__vertical {
+  height: 51%;
+  top: 75%;
+}
+
+.gomoku-point:nth-last-child(-n + 15) .gomoku-point__vertical {
+  height: 51%;
+  top: 25%;
+}
+
+.gomoku-point:nth-child(15n + 1) .gomoku-point__horizontal {
+  left: 75%;
+  width: 51%;
+}
+
+.gomoku-point:nth-child(15n) .gomoku-point__horizontal {
+  left: 25%;
+  width: 51%;
+}
+
+.gomoku-stone {
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgb(36 27 17 / 28%);
+  height: 78%;
+  left: 11%;
+  position: absolute;
+  top: 11%;
+  transform: scale(1);
+  transition: transform 100ms ease;
+  width: 78%;
+  z-index: 2;
+}
+
+.gomoku-point.has-black .gomoku-stone {
+  background: #20211f;
+  border: 1px solid #090a09;
+}
+
+.gomoku-point.has-white .gomoku-stone {
+  background: #f7f7f3;
+  border: 1px solid #b7b7af;
+}
+
+.gomoku-point.is-last .gomoku-stone::after {
+  border: 2px solid #d83b32;
+  border-radius: 50%;
+  content: "";
+  height: 24%;
+  left: 38%;
+  position: absolute;
+  top: 38%;
+  width: 24%;
+}
+
+.gomoku-point.is-winning .gomoku-stone {
+  box-shadow:
+    0 0 0 3px #df3f35,
+    0 2px 4px rgb(36 27 17 / 28%);
+}
+
+.gomoku-point.is-interactive {
+  cursor: pointer;
+}
+
+.gomoku-point.is-interactive::after {
+  background: rgb(25 28 25 / 30%);
+  border-radius: 50%;
+  content: "";
+  height: 68%;
+  left: 16%;
+  opacity: 0;
+  position: absolute;
+  top: 16%;
+  transition: opacity 100ms ease;
+  width: 68%;
+  z-index: 1;
+}
+
+.gomoku-point.is-interactive:hover::after,
+.gomoku-point.is-interactive:focus-visible::after {
+  opacity: 1;
+}
+
+.gomoku-point:focus-visible {
+  outline: 3px solid #13795b;
+  outline-offset: -2px;
+  z-index: 3;
+}
+
+.gomoku-forbidden-mark {
+  color: #a8221a;
+  font-size: clamp(12px, 1.8vw, 18px);
+  font-weight: 800;
+  left: 50%;
+  line-height: 1;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -52%);
+  z-index: 2;
+}
+
+.gomoku-sidebar {
+  align-content: start;
+  display: grid;
+  gap: 18px;
+  max-height: 100%;
+  min-width: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.gomoku-match-header {
+  align-items: center;
+  border-bottom: 1px solid #d8ded9;
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 14px;
+}
+
+.gomoku-match-header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.gomoku-match-header__label,
+.gomoku-player span,
+.gomoku-offer span,
+.gomoku-step-clock span {
+  color: #68716c;
+  font-size: 13px;
+}
+
+.gomoku-match-header strong {
+  color: #202522;
+  font-size: 18px;
+}
+
+.gomoku-connection {
+  align-items: center;
+  color: #53605a;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.gomoku-connection::before {
+  background: #2b9a66;
+  border-radius: 50%;
+  content: "";
+  height: 8px;
+  width: 8px;
+}
+
+.gomoku-connection--reconnecting::before {
+  background: #d79a18;
+}
+
+.gomoku-connection--offline::before {
+  background: #b42318;
+}
+
+.gomoku-players {
+  border-bottom: 1px solid #d8ded9;
+  border-top: 1px solid #d8ded9;
+}
+
+.gomoku-player {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  min-height: 66px;
+  padding: 8px 4px;
+}
+
+.gomoku-player + .gomoku-player {
+  border-top: 1px solid #e6eae7;
+}
+
+.gomoku-player.is-current {
+  background: #eef6f2;
+  box-shadow: inset 3px 0 #13795b;
+}
+
+.gomoku-player__stone {
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 22%);
+  height: 24px;
+  justify-self: center;
+  width: 24px;
+}
+
+.gomoku-player__stone--black {
+  background: #20211f;
+}
+
+.gomoku-player__stone--white {
+  background: #f8f8f5;
+  border: 1px solid #b7b7af;
+}
+
+.gomoku-player > div {
+  display: grid;
+  gap: 2px;
+}
+
+.gomoku-player strong {
+  color: #202522;
+  font-size: 14px;
+}
+
+.gomoku-player time,
+.gomoku-step-clock strong {
+  color: #202522;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.gomoku-step-clock {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.gomoku-step-clock strong {
+  font-size: 22px;
+}
+
+.gomoku-offer {
+  border-left: 3px solid #d49a24;
+  display: grid;
+  gap: 5px;
+  padding: 8px 0 8px 12px;
+}
+
+.gomoku-offer__actions,
+.gomoku-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.gomoku-offer__actions {
+  margin-top: 7px;
+}
+
+.gomoku-actions {
+  border-top: 1px solid #d8ded9;
+  padding-top: 14px;
+}
+
+.gomoku-settings {
+  display: grid;
+  gap: 20px;
+}
+
+.gomoku-settings__group {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.gomoku-settings__group legend,
+.gomoku-settings__timers > label > span:first-child {
+  color: #202522;
+  font-size: 13px;
+  font-weight: 650;
+  margin-bottom: 7px;
+}
+
+.gomoku-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.gomoku-segmented__item {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d8ded9;
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  min-height: 40px;
+  padding: 7px 10px;
+}
+
+.gomoku-segmented__item:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+.gomoku-segmented__item:last-child {
+  border-radius: 0 6px 6px 0;
+}
+
+.gomoku-segmented__item + .gomoku-segmented__item {
+  border-left: 0;
+}
+
+.gomoku-segmented__item.is-selected {
+  background: #e6f3ed;
+  box-shadow: inset 0 0 0 1px #13795b;
+  color: #0e6248;
+}
+
+.gomoku-segmented__item input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.gomoku-segmented__item:has(input:focus-visible) {
+  outline: 3px solid #8bcbb7;
+  outline-offset: 2px;
+  z-index: 1;
+}
+
+.gomoku-toggle {
+  align-items: center;
+  color: #202522;
+  cursor: pointer;
+  display: flex;
+  font-size: 14px;
+  gap: 9px;
+}
+
+.gomoku-toggle input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.gomoku-toggle__track {
+  background: #aeb7b1;
+  border-radius: 999px;
+  height: 22px;
+  position: relative;
+  transition: background-color 120ms ease;
+  width: 40px;
+}
+
+.gomoku-toggle__track::after {
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 24%);
+  content: "";
+  height: 18px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform 120ms ease;
+  width: 18px;
+}
+
+.gomoku-toggle input:checked + .gomoku-toggle__track {
+  background: #13795b;
+}
+
+.gomoku-toggle input:checked + .gomoku-toggle__track::after {
+  transform: translateX(18px);
+}
+
+.gomoku-toggle input:focus-visible + .gomoku-toggle__track {
+  outline: 3px solid #8bcbb7;
+  outline-offset: 2px;
+}
+
+.gomoku-settings__timers {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.gomoku-settings__timers > label {
+  display: grid;
+}
+
+.gomoku-number-field {
+  align-items: center;
+  border: 1px solid #d8ded9;
+  border-radius: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.gomoku-number-field input {
+  border: 0;
+  color: #202522;
+  font: inherit;
+  height: 40px;
+  min-width: 0;
+  padding: 0 10px;
+}
+
+.gomoku-number-field > span {
+  color: #68716c;
+  font-size: 13px;
+  padding-right: 10px;
+}
+
+@media (max-width: 1100px) {
+  .gomoku-game {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  }
+}

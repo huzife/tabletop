@@ -1,0 +1,43 @@
+{
+  "name": "@tabletop/game-template",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./shared/index.ts",
+      "development": "./shared/index.ts",
+      "import": "./dist/shared/index.js"
+    },
+    "./server": {
+      "types": "./server/index.ts",
+      "development": "./server/index.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./web": {
+      "types": "./web/index.ts",
+      "development": "./web/index.ts",
+      "import": "./dist/web/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tabletop/game-sdk": "workspace:*",
+    "@tabletop/protocol": "workspace:*",
+    "react": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -1,0 +1,40 @@
+@startuml
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam backgroundColor white
+skinparam shadowing false
+
+start
+:按骰子逐步沿逻辑路径移动;
+while (仍有普通移动步数?) is (是)
+  if (本步到达敌方叠机且后面仍有步数?) then (是)
+    :把叠机格作为瞬时折返点;
+    :方向反转，继续消耗剩余步数;
+  elseif (本步越过最终终点?) then (是)
+    :把终点作为瞬时折返点;
+    :沿终点跑道反向;
+  else (否)
+    :正常前进或后退一步;
+  endif
+endwhile (否)
+:结算最终落点\n空格 / 己方叠加 / 吃单机 / 叠机同归于尽;
+if (位于本色跳跃格且尚未跳跃?) then (是)
+  if (四格路径跨越敌方叠机?) then (是)
+    :取消跳跃并保留原位置;
+  else (否)
+    :跳跃四格并结算落点;
+    :标记本行动已跳跃;
+  endif
+endif
+if (当前位置是快捷飞行入口?) then (是)
+  :飞行到出口，可跨越叠机;
+  :结算出口落点;
+endif
+if (飞行后满足跳跃且此前未成功跳跃?) then (是)
+  :再尝试一次四格跳跃;
+endif
+if (恰好抵达最终终点?) then (是)
+  :飞机标记 FINISHED 并从棋盘移除;
+endif
+:输出权威新状态和展示步骤列表;
+stop
+@enduml

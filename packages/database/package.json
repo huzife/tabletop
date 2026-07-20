@@ -1,0 +1,38 @@
+{
+  "name": "@tabletop/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "drizzle"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "catalog:",
+    "drizzle-orm": "catalog:",
+    "ulid": "catalog:"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "catalog:",
+    "@types/node": "catalog:",
+    "drizzle-kit": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

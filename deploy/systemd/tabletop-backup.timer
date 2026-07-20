@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Tabletop database backup every day
+
+[Timer]
+OnCalendar=*-*-* 04:15:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=tabletop-backup.service
+
+[Install]
+WantedBy=timers.target

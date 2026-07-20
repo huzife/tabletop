@@ -1,0 +1,44 @@
+@startuml
+skinparam defaultFontName "WenQuanYi Micro Hei"
+left to right direction
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam packageStyle rectangle
+
+actor "唯一管理员" as Admin
+actor "注册用户" as User
+actor "房间玩家" as Player
+actor "观众" as Spectator
+actor "服务器 AI" as Bot
+
+User <|-- Player
+User <|-- Spectator
+
+rectangle "Tabletop" {
+  usecase "登录并保持会话" as UCLogin
+  usecase "浏览游戏与房间" as UCBrowse
+  usecase "创建 / 加入房间" as UCRoom
+  usecase "选座、准备、开始" as UCReady
+  usecase "执行合法游戏动作" as UCPlay
+  usecase "观战" as UCWatch
+  usecase "房间聊天" as UCChat
+  usecase "创建与维护账号" as UCAccount
+  usecase "全站 / 单游戏启停" as UCService
+  usecase "检索与导出审计" as UCAudit
+  usecase "填充或接管座位" as UCBot
+}
+
+User --> UCLogin
+User --> UCBrowse
+User --> UCRoom
+Player --> UCReady
+Player --> UCPlay
+Player --> UCChat
+Spectator --> UCWatch
+Spectator --> UCChat
+Admin --> UCAccount
+Admin --> UCService
+Admin --> UCAudit
+Bot --> UCBot
+UCBot ..> UCPlay : <<include>>
+@enduml

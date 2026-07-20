@@ -1,0 +1,58 @@
+{
+  "name": "@tabletop/game-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./server": {
+      "types": "./src/server/index.ts",
+      "development": "./src/server/index.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./web": {
+      "types": "./src/web/index.ts",
+      "development": "./src/web/index.ts",
+      "import": "./dist/web/index.js"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "development": "./src/testing/index.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tabletop/protocol": "workspace:*",
+    "zod": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "react": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

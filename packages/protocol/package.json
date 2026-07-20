@@ -1,0 +1,42 @@
+{
+  "name": "@tabletop/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    },
+    "./http": {
+      "types": "./src/http/index.ts",
+      "development": "./src/http/index.ts",
+      "import": "./dist/http/index.js"
+    },
+    "./ws": {
+      "types": "./src/ws/index.ts",
+      "development": "./src/ws/index.ts",
+      "import": "./dist/ws/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

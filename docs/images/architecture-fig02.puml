@@ -1,0 +1,32 @@
+@startuml
+skinparam defaultFontName "WenQuanYi Micro Hei"
+skinparam backgroundColor white
+skinparam shadowing false
+autonumber
+
+actor 玩家
+participant "浏览器公共外壳" as Web
+participant "WebSocket 网关" as Gateway
+participant "房间串行队列" as Queue
+participant "Game Host" as Host
+participant "游戏 Server 插件" as Plugin
+participant "Deadline Scheduler" as Scheduler
+collections "玩家 / 观众连接" as Peers
+
+玩家 -> Web : 提交插件定义的游戏动作
+Web -> Gateway : game.action\nrequestId + expectedRevision
+Gateway -> Gateway : 会话、大小、频率校验\n记录 receivedAt
+Gateway -> Queue : 提交不可变命令
+Queue -> Queue : 幂等、房间、对局、控制权校验
+Queue -> Host : handleGameAction(context, payload)
+Host -> Plugin : handleAction(state, action)
+Plugin --> Host : 新状态 + 展示事件 + outcome
+Host -> Plugin : projectView(state, viewer)
+Plugin --> Host : 玩家或观众投影视图
+Host --> Queue : 转换结果与各接收者快照
+Queue -> Queue : 原子替换状态，revision + 1
+Queue -> Scheduler : 更新有效截止任务
+Queue -> Peers : room.snapshot\n各自投影 + 展示事件
+Peers --> Web : 当前玩家收到新快照
+Web --> 玩家 : 立即更新状态并播放短动画
+@enduml
