@@ -68,9 +68,15 @@ describe("room HTTP routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
     const catalog = gamesResponseSchema.parse(response.json());
-    expect(catalog.games).toHaveLength(2);
+    expect(catalog.games).toHaveLength(3);
     expect(catalog.games).toEqual(
       expect.arrayContaining([
+        expect.objectContaining({
+          apiVersion: 1,
+          botProfiles: [],
+          enabled: true,
+          gameId: "billiards",
+        }),
         expect.objectContaining({
           apiVersion: 1,
           botProfiles: expect.arrayContaining([expect.objectContaining({ profileId: "hard" })]),

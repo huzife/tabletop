@@ -15,6 +15,7 @@
   "dependencies": {
     "@fastify/cookie": "catalog:",
     "@fastify/cors": "catalog:",
+    "@tabletop/game-billiards": "workspace:*",
     "@tabletop/game-gomoku": "workspace:*",
     "@tabletop/game-ludo": "workspace:*",
     "@tabletop/database": "workspace:*",
