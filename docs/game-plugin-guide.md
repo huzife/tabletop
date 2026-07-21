@@ -71,13 +71,14 @@ interface GameManifestV1 {
     timers: boolean;
     hiddenInformation: boolean;
     bots: boolean;
+    soloPractice: boolean;
     temporaryController: boolean;
     manualSeatReclaim: boolean;
   };
 }
 ```
 
-Manifest 用于首页、房间容量和宿主能力门控，不用于描述具体棋盘规则。当前 v1 宿主只接受 `turn_based`，但保留另外两个枚举值，未来通过新的宿主能力版本启用。
+Manifest 用于首页、房间容量和宿主能力门控，不用于描述具体棋盘规则。`bots` 表示插件提供服务器 Bot provider，`soloPractice` 表示练习房允许仅一个真人且不添加 Bot；两者相互独立，普通联机房始终遵守 `minPlayers`。当前 v1 宿主只接受 `turn_based`，但保留另外两个枚举值，未来通过新的宿主能力版本启用。
 
 `gameId` 一经进入 `master` 不能更改，使用小写字母、数字和短横线；显示名称可以调整。玩家数指真人和 AI 座位总数，不包含观众。
 
@@ -96,7 +97,7 @@ interface BotProfileV1 {
 }
 ```
 
-`profileId` 在单个插件内唯一且稳定，`timeBudgetMs` 是服务端执行硬预算。目录中的 profile 用于房主添加 AI、练习房选择和展示选项；断线/超时兜底控制器不出现在该数组中。练习房创建时平台用所选 `botProfileId` 填充真人之外的座位，再以“已占座位均已准备”的上下文调用 `validateStart` 做结构性预检；插件应在该入口拒绝与 AI 不兼容的设置组合，不要让平台按 `gameId` 特判。
+`profileId` 在单个插件内唯一且稳定，`timeBudgetMs` 是服务端执行硬预算。目录中的 profile 用于房主添加 AI、练习房选择和展示选项；断线/超时兜底控制器不出现在该数组中。声明 `bots` 的练习房由平台用所选 `botProfileId` 填充真人之外的座位；仅声明 `soloPractice` 的练习房只占用首个真人座位并保留其他座位为空，其他成员可以观战但不能再占座。两种流程都以“已占座位均已准备”的上下文调用 `validateStart` 做结构性预检；插件应在该入口拒绝不兼容的设置或座位组合，不要让平台按 `gameId` 特判。
 
 ## 4. 设置合同
 

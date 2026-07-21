@@ -39,6 +39,7 @@ const shared = defineGameSharedContractV1({
       hiddenInformation: false,
       manualSeatReclaim: false,
       midgameJoin: false,
+      soloPractice: false,
       spectators: true,
       temporaryController: false,
       timers: false,
@@ -104,6 +105,68 @@ const testGame = defineGameServerModuleV1({
   projectView: (_context, state) => ({ moves: state.moves, turn: state.turn }),
 });
 
+function createBotlessTestGame(gameId: string, soloPractice: boolean) {
+  const gameShared = defineGameSharedContractV1({
+    actionSchema,
+    displayEventSchema: eventSchema,
+    manifest: {
+      apiVersion: 1,
+      capabilities: {
+        bots: false,
+        hiddenInformation: false,
+        manualSeatReclaim: false,
+        midgameJoin: false,
+        soloPractice,
+        spectators: true,
+        temporaryController: false,
+        timers: false,
+      },
+      description: "无 AI 房间运行时测试插件",
+      displayName: "无 AI 测试插件",
+      gameId: gameIdSchema.parse(gameId),
+      interactionMode: "turn_based" as const,
+      maxPlayers: 2,
+      minPlayers: 2,
+    },
+    settings: { defaultValue: {}, schema: settingsSchema, summarize: () => [] },
+    viewSchema,
+  });
+
+  return defineGameServerModuleV1({
+    shared: gameShared,
+    lobby: {
+      getSeatDefinitions: () => createDefaultSeatDefinitionsV1(2),
+      validateStart: ({ seats }) =>
+        seats.some(({ occupant }) => occupant === "human") &&
+        seats.every(({ occupant }) => occupant !== "bot")
+          ? { ok: true }
+          : { ok: false, ruleCode: "HUMAN_REQUIRED" },
+    },
+    createMatch: ({ seats }) => {
+      const first = seats[0];
+      if (!first) throw new GameRuleError("HUMAN_REQUIRED");
+      return { moves: 0, turn: first.seatId };
+    },
+    getActiveSeatIds: (state) => [state.turn],
+    getDeadlines: () => [],
+    handleAction: (_context, state) => ({ kind: "noop", state }),
+    handleDeadline: (_context, state) => ({ kind: "noop", state }),
+    handleSystemEvent: (_context, state, event) =>
+      soloPractice && event.type === "connection.grace_expired"
+        ? {
+            events: [],
+            kind: "applied",
+            roomDirectives: [{ seatId: event.seatId, type: "seat.release" }],
+            state,
+          }
+        : { kind: "noop", state },
+    projectView: (_context, state) => ({ moves: state.moves, turn: state.turn }),
+  });
+}
+
+const soloPracticeGame = createBotlessTestGame("test-solo-practice", true);
+const noPracticeGame = createBotlessTestGame("test-no-practice", false);
+
 const pausedAutomation: GameAutomationExecutor = {
   chooseBotAction: () => new Promise(() => undefined),
   chooseFallbackAction: () => new Promise(() => undefined),
@@ -139,7 +202,7 @@ function createTestRegistry(
   );
   const registry = new RoomRegistry({
     ...(options.automation === undefined ? {} : { automation: options.automation }),
-    games: registerServerGamesV1([testGame]),
+    games: registerServerGamesV1([testGame, soloPracticeGame, noPracticeGame]),
     ...(options.passwords === undefined ? {} : { passwords: options.passwords }),
     repositories,
   });
@@ -652,6 +715,10 @@ describe("RoomRegistry and RoomRuntime", () => {
       session: sessions[0]!,
       settings: {},
     });
+    expect(created.room.state.seats[1]?.occupant).toMatchObject({
+      kind: "bot",
+      profileId: "test",
+    });
     const joined = await registry.consumeJoinTicket(
       created.ticket.token,
       accounts[0]!,
@@ -699,6 +766,200 @@ describe("RoomRegistry and RoomRuntime", () => {
     await created.room.queue.run(() => undefined);
     expect(created.room.state.match?.state).toBe(stateAtDestroy);
     expect(botCalls).toBe(3);
+  });
+
+  it("creates and starts a botless solo-practice room with one occupied seat", async () => {
+    const { accounts, registry, sessions } = createTestRegistry(closers, { accountCount: 2 });
+    const created = await registry.createRoom({
+      account: accounts[0]!,
+      gameId: "test-solo-practice",
+      name: "无 AI 单人练习",
+      practice: true,
+      session: sessions[0]!,
+      settings: {},
+    });
+    const joined = await registry.consumeJoinTicket(
+      created.ticket.token,
+      accounts[0]!,
+      sessions[0]!,
+    );
+    const guestTicket = registry.issueInviteJoinTicket({
+      inviteToken: created.room.state.inviteToken,
+      session: sessions[1]!,
+    });
+    const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
+
+    expect(created.room.state.seats).toMatchObject([
+      { controller: { kind: "human" }, occupant: { kind: "human" } },
+      { controller: null, occupant: null },
+    ]);
+    expect(
+      created.room.projectSnapshot(guest.member.memberId).permissions.claimableSeatIds,
+    ).toEqual([]);
+    await expect(
+      created.room.claimSeat(
+        guest.member.memberId,
+        seatIdSchema.parse("seat-2"),
+        created.room.state.revision,
+      ),
+    ).rejects.toMatchObject({ code: "ROOM_INVALID_STATE" });
+    await created.room.setReady(joined.member.memberId, true, created.room.state.revision);
+    await created.room.startMatch(joined.member.memberId, created.room.state.revision);
+
+    expect(created.room.state.status).toBe("playing");
+    expect(created.room.state.match?.state).toMatchObject({ moves: 0, turn: "seat-1" });
+    await created.room.leave(joined.member.memberId);
+    expect(created.room.destroyed).toBe(true);
+    expect(registry.bindingForSession(sessions[1]!.id)).toBeUndefined();
+    expect(() => registry.require(created.room.state.roomId)).toThrowError(
+      expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
+    );
+  });
+
+  it("keeps a bot practice room for an invited spectator after its player leaves", async () => {
+    const connection = openDatabase(":memory:");
+    closers.push(() => connection.close());
+    const repositories = createRepositories(connection.database);
+    const accounts = [
+      repositories.accounts.create({ passwordHash: "hash", username: "AI练习房主" }),
+      repositories.accounts.create({ passwordHash: "hash", username: "AI练习观众" }),
+    ];
+    const sessions = accounts.map((account, index) =>
+      repositories.sessions.create({
+        accountId: account.id,
+        csrfSecretHash: Buffer.alloc(32, index + 131),
+        expiresAt: Date.now() + 60_000,
+        tokenHash: Buffer.alloc(32, index + 141),
+      }),
+    );
+    const registry = new RoomRegistry({
+      automation: pausedAutomation,
+      games: serverGameRegistry,
+      repositories,
+    });
+    const created = await registry.createRoom({
+      account: accounts[0]!,
+      botProfileId: "easy",
+      gameId: "gomoku",
+      name: "保留的 AI 练习房",
+      practice: true,
+      session: sessions[0]!,
+      settings: {
+        moveTimeSeconds: 60,
+        rule: "freestyle",
+        timerEnabled: false,
+        totalTimeMinutes: 10,
+      },
+    });
+    closers.push(() => created.room.destroy("host_closed", "测试结束"));
+    const host = await registry.consumeJoinTicket(created.ticket.token, accounts[0]!, sessions[0]!);
+    const guestTicket = registry.issueInviteJoinTicket({
+      inviteToken: created.room.state.inviteToken,
+      session: sessions[1]!,
+    });
+    const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
+
+    await created.room.setReady(host.member.memberId, true, created.room.state.revision);
+    await created.room.startMatch(host.member.memberId, created.room.state.revision);
+    await created.room.leave(host.member.memberId);
+
+    expect(created.room.destroyed).toBe(false);
+    expect(created.room.state.status).toBe("post_match");
+    expect(created.room.state.hostMemberId).toBe(guest.member.memberId);
+    expect(
+      created.room.projectSnapshot(guest.member.memberId).permissions.claimableSeatIds,
+    ).toEqual(["seat-1"]);
+    await created.room.claimSeat(
+      guest.member.memberId,
+      seatIdSchema.parse("seat-1"),
+      created.room.state.revision,
+    );
+    expect(created.room.state.seats[0]?.occupant).toMatchObject({ kind: "human" });
+  });
+
+  it("destroys solo practice after grace expiry releases its only player seat", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const { accounts, registry, sessions } = createTestRegistry(closers, { accountCount: 2 });
+    const created = await registry.createRoom({
+      account: accounts[0]!,
+      gameId: "test-solo-practice",
+      name: "断线后的单人练习",
+      practice: true,
+      session: sessions[0]!,
+      settings: {},
+    });
+    const joined = await registry.consumeJoinTicket(
+      created.ticket.token,
+      accounts[0]!,
+      sessions[0]!,
+    );
+    await created.room.attachConnection(joined.member.memberId, "connection-solo-host");
+    const guestTicket = registry.issueInviteJoinTicket({
+      inviteToken: created.room.state.inviteToken,
+      session: sessions[1]!,
+    });
+    const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
+    await created.room.attachConnection(guest.member.memberId, "connection-solo-spectator");
+    await created.room.setReady(joined.member.memberId, true, created.room.state.revision);
+    await created.room.startMatch(joined.member.memberId, created.room.state.revision);
+
+    await created.room.connectionLost(
+      joined.member.memberId,
+      "connection-solo-host",
+      Date.now() - 30_001,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    await created.room.queue.run(() => undefined);
+
+    expect(created.room.destroyed).toBe(true);
+    expect(registry.bindingForSession(sessions[1]!.id)).toBeUndefined();
+    expect(() => registry.require(created.room.state.roomId)).toThrowError(
+      expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
+    );
+  });
+
+  it("retains manifest minimum players for normal rooms that support solo practice", async () => {
+    const { accounts, registry, sessions } = createTestRegistry(closers);
+    const created = await registry.createRoom({
+      account: accounts[0]!,
+      gameId: "test-solo-practice",
+      name: "普通双人房",
+      practice: false,
+      session: sessions[0]!,
+      settings: {},
+    });
+    const joined = await registry.consumeJoinTicket(
+      created.ticket.token,
+      accounts[0]!,
+      sessions[0]!,
+    );
+    await created.room.claimSeat(
+      joined.member.memberId,
+      seatIdSchema.parse("seat-1"),
+      created.room.state.revision,
+    );
+    await created.room.setReady(joined.member.memberId, true, created.room.state.revision);
+
+    await expect(
+      created.room.startMatch(joined.member.memberId, created.room.state.revision),
+    ).rejects.toMatchObject({ code: "ROOM_INVALID_STATE" });
+    created.room.destroy("host_closed", "测试结束");
+  });
+
+  it("rejects practice rooms when the game supports neither bots nor solo practice", async () => {
+    const { accounts, registry, sessions } = createTestRegistry(closers);
+
+    await expect(
+      registry.createRoom({
+        account: accounts[0]!,
+        gameId: "test-no-practice",
+        name: "不支持练习",
+        practice: true,
+        session: sessions[0]!,
+        settings: {},
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+    expect(registry.bindingForSession(sessions[0]!.id)).toBeUndefined();
   });
 
   it("rejects an unknown practice AI profile", async () => {

@@ -10,6 +10,7 @@ export const gameCapabilitiesSummarySchema = z.strictObject({
   timers: z.boolean(),
   hiddenInformation: z.boolean(),
   bots: z.boolean(),
+  soloPractice: z.boolean().default(false),
   temporaryController: z.boolean(),
   manualSeatReclaim: z.boolean(),
 });

@@ -1,6 +1,7 @@
 import { GameRuleError } from "@tabletop/game-sdk/server";
 import {
   createTestActionContextV1,
+  createTestCreateMatchContextV1,
   createTestProjectionContextV1,
   createTestSystemEventContextV1,
   SequenceGameRandomV1,
@@ -9,13 +10,16 @@ import { seatIdSchema } from "@tabletop/protocol";
 import { describe, expect, it } from "vitest";
 
 import {
+  createBilliardsMatch,
   handleBilliardsAction,
   handleBilliardsSystemEvent,
   projectBilliardsView,
 } from "../server/engine.js";
 import { adjudicateChineseEightBallShot } from "../server/rules/eight-ball.js";
 import { checkCuePlacement } from "../server/rules/placement.js";
+import { adjudicatePracticeShot } from "../server/rules/practice.js";
 import { adjudicateSnookerShot as adjudicateSnookerShotWithRandom } from "../server/rules/snooker.js";
+import { billiardsServerModule } from "../server/module.js";
 import {
   createChineseEightBallRack,
   createInitialBilliardsState,
@@ -42,6 +46,10 @@ function adjudicateSnookerShot(
 
 function state(mode: "chinese-eight-ball" | "snooker"): BilliardsMatchState {
   return createInitialBilliardsState({ mode }, seats);
+}
+
+function practiceState(mode: "chinese-eight-ball" | "snooker"): BilliardsMatchState {
+  return createInitialBilliardsState({ mode }, [seat1]);
 }
 
 function shot(nominatedColor: BilliardsShot["nominatedColor"] = null): BilliardsShot {
@@ -546,7 +554,7 @@ describe("Chinese eight-ball rules", () => {
       simulation: simulation(open, { firsts: ["1", "9"], potted: ["9"] }),
       state: open,
     });
-    expect(onePotted.state.players[0].group).toBe("stripes");
+    expect(onePotted.state.players.find(({ seatId }) => seatId === seat1)?.group).toBe("stripes");
 
     const oppositeOnly = adjudicateChineseEightBallShot({
       actorSeatId: seat1,
@@ -705,7 +713,7 @@ describe("snooker rules", () => {
     const blackSpot = tableSpecFor("snooker").spots.find(({ id }) => id === "black");
     const blackBall = black.state.balls.find(({ kind }) => kind === "black");
     expect(black).toMatchObject({ points: 7, state: { activeSeatId: seat1, snookerOn: "red" } });
-    expect(black.state.players[0].score).toBe(8);
+    expect(black.state.players.find(({ seatId }) => seatId === seat1)?.score).toBe(8);
     expect(blackBall?.pocketed).toBe(false);
     expect(blackBall?.x).toBeCloseTo(blackSpot?.x ?? 0);
   });
@@ -775,7 +783,7 @@ describe("snooker rules", () => {
     });
     expect(foul.foulCode).toBe("WRONG_FIRST_CONTACT");
     expect(foul.points).toBe(7);
-    expect(foul.state.players[1].score).toBe(7);
+    expect(foul.state.players.find(({ seatId }) => seatId === seat2)?.score).toBe(7);
     expect(foul.state.balls.find(({ kind }) => kind === "black")?.pocketed).toBe(false);
     expect(foul.state.activeSeatId).toBe(seat2);
 
@@ -982,6 +990,223 @@ describe("snooker rules", () => {
       ballInHandZone: "d",
       pendingDecision: null,
       phase: "ball_in_hand",
+    });
+  });
+});
+
+describe("single-player practice", () => {
+  it("accepts one human plus one empty lobby seat and creates a one-seat practice state", () => {
+    const definitions = billiardsServerModule.lobby?.getSeatDefinitions({
+      mode: "chinese-eight-ball",
+    });
+    const validateStart = billiardsServerModule.lobby?.validateStart;
+    if (!definitions || !validateStart) throw new Error("missing billiards lobby contract");
+
+    expect(
+      validateStart(
+        {
+          seats: definitions.map(({ seatId }, index) => ({
+            occupant: index === 0 ? ("human" as const) : ("empty" as const),
+            ready: index === 0,
+            seatId,
+          })),
+        },
+        { mode: "chinese-eight-ball" },
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      validateStart(
+        {
+          seats: definitions.map(({ seatId }) => ({
+            occupant: "human" as const,
+            ready: true,
+            seatId,
+          })),
+        },
+        { mode: "chinese-eight-ball" },
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      validateStart(
+        {
+          seats: definitions.map(({ seatId }, index) => ({
+            occupant: index === 0 ? ("human" as const) : ("bot" as const),
+            ready: true,
+            seatId,
+          })),
+        },
+        { mode: "chinese-eight-ball" },
+      ),
+    ).toMatchObject({ ok: false });
+
+    const practice = createBilliardsMatch(
+      createTestCreateMatchContextV1({
+        seats: [{ controller: { kind: "human" }, seatId: seat1 }],
+      }),
+      { mode: "chinese-eight-ball" },
+    );
+    expect(practice).toMatchObject({
+      activeSeatId: seat1,
+      ballInHandZone: "behind-line",
+      phase: "ball_in_hand",
+      players: [{ group: null, score: 0, seatId: seat1 }],
+      practice: true,
+      seatIds: [seat1],
+      snookerOn: null,
+    });
+
+    const versus = createBilliardsMatch(createTestCreateMatchContextV1(), {
+      mode: "chinese-eight-ball",
+    });
+    expect(versus).toMatchObject({ practice: false, seatIds: [seat1, seat2] });
+  });
+
+  it("keeps every shot with the same player and ignores competitive foul conditions", () => {
+    const initial = readyToShoot(practiceState("chinese-eight-ball"));
+    const result = adjudicatePracticeShot({
+      actorSeatId: seat1,
+      shot: { ...shot(), tip: { x: 0, y: -0.5 } },
+      simulation: simulation(initial, {
+        first: null,
+        jumped: ["1"],
+        potted: ["8"],
+        postContactRails: [],
+      }),
+      state: initial,
+    });
+
+    expect(result).toMatchObject({
+      foulCode: null,
+      points: 0,
+      state: {
+        activeSeatId: seat1,
+        ballInHandZone: null,
+        lastShot: { foulCode: null, points: 0, pottedBallIds: ["8"], seatId: seat1 },
+        outcome: null,
+        pendingDecision: null,
+        phase: "aiming",
+        players: [{ group: null, score: 0, seatId: seat1 }],
+        shotNumber: 1,
+      },
+    });
+    expect(result.state.balls.find(({ kind }) => kind === "eight")?.pocketed).toBe(true);
+  });
+
+  it("keeps object balls down and grants an anywhere cue ball after a scratch", () => {
+    const initial = readyToShoot(practiceState("chinese-eight-ball"));
+    const result = adjudicatePracticeShot({
+      actorSeatId: seat1,
+      shot: shot(),
+      simulation: simulation(initial, { first: "1", potted: ["1", "cue"] }),
+      state: initial,
+    });
+
+    expect(result).toMatchObject({
+      foulCode: null,
+      points: 0,
+      state: {
+        activeSeatId: seat1,
+        ballInHandZone: "anywhere",
+        phase: "ball_in_hand",
+        players: [{ score: 0 }],
+      },
+    });
+    expect(result.state.balls.find(({ id }) => id === "1")?.pocketed).toBe(true);
+    expect(result.state.balls.find(({ kind }) => kind === "cue")?.pocketed).toBe(true);
+  });
+
+  it("does not respot snooker colors or rerack a cleared practice table", () => {
+    const snooker = readyToShoot(practiceState("snooker"));
+    const black = adjudicatePracticeShot({
+      actorSeatId: seat1,
+      shot: shot(),
+      simulation: simulation(snooker, { first: "black", potted: ["black"] }),
+      state: snooker,
+    });
+    expect(black.state).toMatchObject({ activeSeatId: seat1, outcome: null, snookerOn: null });
+    expect(black.state.balls.find(({ kind }) => kind === "black")?.pocketed).toBe(true);
+
+    const eightBall = readyToShoot(practiceState("chinese-eight-ball"));
+    const objectIds = eightBall.balls.filter(({ kind }) => kind !== "cue").map(({ id }) => id);
+    const cleared = adjudicatePracticeShot({
+      actorSeatId: seat1,
+      shot: shot(),
+      simulation: simulation(eightBall, { first: "1", potted: objectIds }),
+      state: eightBall,
+    });
+    expect(cleared.state).toMatchObject({
+      activeSeatId: seat1,
+      breakShot: false,
+      outcome: null,
+      phase: "aiming",
+      shotNumber: 1,
+    });
+    expect(
+      cleared.state.balls.filter(({ kind }) => kind !== "cue").every(({ pocketed }) => pocketed),
+    ).toBe(true);
+  });
+
+  it("bypasses snooker nomination, disables resignation, and projects a valid solo view", () => {
+    const initial: BilliardsMatchState = {
+      ...readyToShoot(practiceState("snooker")),
+      snookerOn: "color",
+    };
+    const transition = handleBilliardsAction(
+      createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
+      initial,
+      { type: "billiards.shoot", shot: shot(null) },
+    );
+    expect(transition).toMatchObject({
+      kind: "applied",
+      state: { activeSeatId: seat1, outcome: null, practice: true },
+    });
+    expect(transition.events[0]).toMatchObject({
+      foulCode: null,
+      nextSeatId: seat1,
+      points: 0,
+      seatId: seat1,
+      type: "billiards.shot",
+    });
+
+    expectRuleCode(
+      () =>
+        handleBilliardsAction(
+          createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
+          initial,
+          { type: "billiards.resign" },
+        ),
+      "RESIGN_NOT_AVAILABLE_IN_PRACTICE",
+    );
+    const view = projectBilliardsView(createTestProjectionContextV1(), initial, {
+      kind: "player",
+      seatId: seat1,
+    });
+    expect(view).toMatchObject({
+      legalActions: { canResign: false, canShoot: true },
+      players: [{ active: true, group: null, score: 0, seatId: seat1 }],
+      practice: true,
+      viewerSeatId: seat1,
+    });
+    expect(() => billiardsViewSchema.parse(view)).not.toThrow();
+  });
+
+  it("lets a solo leave close the room and releases a stale seat after disconnect grace", () => {
+    const initial = practiceState("chinese-eight-ball");
+    const left = handleBilliardsSystemEvent(createTestSystemEventContextV1(), initial, {
+      type: "member.left",
+      seatId: seat1,
+    });
+    expect(left).toEqual({ kind: "noop", state: initial });
+
+    const expired = handleBilliardsSystemEvent(createTestSystemEventContextV1(), initial, {
+      type: "connection.grace_expired",
+      seatId: seat1,
+    });
+    expect(expired).toEqual({
+      events: [],
+      kind: "applied",
+      roomDirectives: [{ seatId: seat1, type: "seat.release" }],
+      state: initial,
     });
   });
 });

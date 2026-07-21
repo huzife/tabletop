@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { gamesResponseSchema } from "./games.js";
+import { gameCapabilitiesSummarySchema, gamesResponseSchema } from "./games.js";
 
 describe("game catalog HTTP schema", () => {
+  it("defaults the additive solo-practice capability for v1 catalog entries", () => {
+    expect(
+      gameCapabilitiesSummarySchema.parse({
+        bots: false,
+        hiddenInformation: false,
+        manualSeatReclaim: false,
+        midgameJoin: false,
+        spectators: true,
+        temporaryController: false,
+        timers: false,
+      }).soloPractice,
+    ).toBe(false);
+  });
+
   it("publishes generic bot profiles without game-specific fields", () => {
     const response = gamesResponseSchema.parse({
       games: [
@@ -21,6 +35,7 @@ describe("game catalog HTTP schema", () => {
             hiddenInformation: false,
             manualSeatReclaim: false,
             midgameJoin: false,
+            soloPractice: false,
             spectators: true,
             temporaryController: true,
             timers: true,

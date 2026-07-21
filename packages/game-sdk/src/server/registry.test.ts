@@ -40,6 +40,7 @@ function createTestModule(gameId: "test-alpha" | "test-beta" = "test-alpha") {
         timers: false,
         hiddenInformation: true,
         bots: false,
+        soloPractice: false,
         temporaryController: false,
         manualSeatReclaim: false,
       },

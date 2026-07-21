@@ -128,6 +128,7 @@ export const ludoShared = defineGameSharedContractV1({
       timers: true,
       hiddenInformation: false,
       bots: true,
+      soloPractice: false,
       temporaryController: true,
       manualSeatReclaim: true,
     },

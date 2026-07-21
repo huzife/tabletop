@@ -178,11 +178,8 @@ export class RoomRegistry {
 
       if (input.practice) {
         const humanSeat = seats[0];
-        const botProfiles = game.listBotProfiles();
-        const botProfile = input.botProfileId
-          ? botProfiles.find(({ profileId }) => profileId === input.botProfileId)
-          : botProfiles[0];
-        if (!humanSeat || !botProfile) {
+        const { bots, soloPractice } = game.manifest.capabilities;
+        if (!humanSeat || (!bots && !soloPractice)) {
           throw new HttpError(400, "VALIDATION_FAILED", "该游戏或 AI 难度不支持单人练习");
         }
         humanSeat.occupant = {
@@ -193,13 +190,25 @@ export class RoomRegistry {
           ready: false,
         };
         humanSeat.controller = { kind: "human" };
-        for (const seat of seats.slice(1)) {
-          seat.occupant = {
-            displayName: botProfile.displayName,
-            kind: "bot",
-            profileId: botProfile.profileId,
-          };
-          seat.controller = { kind: "bot", profileId: botProfile.profileId };
+
+        if (bots) {
+          const botProfiles = game.listBotProfiles();
+          const botProfile = input.botProfileId
+            ? botProfiles.find(({ profileId }) => profileId === input.botProfileId)
+            : botProfiles[0];
+          if (!botProfile) {
+            throw new HttpError(400, "VALIDATION_FAILED", "该游戏或 AI 难度不支持单人练习");
+          }
+          for (const seat of seats.slice(1)) {
+            seat.occupant = {
+              displayName: botProfile.displayName,
+              kind: "bot",
+              profileId: botProfile.profileId,
+            };
+            seat.controller = { kind: "bot", profileId: botProfile.profileId };
+          }
+        } else if (input.botProfileId !== undefined) {
+          throw new HttpError(400, "VALIDATION_FAILED", "该游戏不提供 AI 难度");
         }
         const validation = game.validateStart(
           settings,

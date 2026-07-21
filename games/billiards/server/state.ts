@@ -53,7 +53,7 @@ export type BilliardsPendingDecision =
 
 export interface BilliardsMatchState {
   readonly settings: Readonly<BilliardsSettings>;
-  readonly seatIds: readonly [SeatId, SeatId];
+  readonly seatIds: readonly SeatId[];
   readonly activeSeatId: SeatId | null;
   readonly ballInHandZone: BallInHandZone | null;
   readonly balls: readonly BilliardsBall[];
@@ -63,7 +63,8 @@ export interface BilliardsMatchState {
   readonly outcome: BilliardsOutcome | null;
   readonly pendingDecision: BilliardsPendingDecision | null;
   readonly phase: BilliardsPhase;
-  readonly players: readonly [BilliardsPlayerState, BilliardsPlayerState];
+  readonly players: readonly BilliardsPlayerState[];
+  readonly practice: boolean;
   readonly shotNumber: number;
   readonly snookerOn: SnookerOn | null;
 }

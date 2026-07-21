@@ -118,18 +118,24 @@ export function createInitialBalls(mode: BilliardsMode): readonly BilliardsBall[
 
 export function createInitialBilliardsState(
   settings: Readonly<BilliardsSettings>,
-  seatIds: readonly [SeatId, SeatId],
+  seatIds: readonly SeatId[],
 ): BilliardsMatchState {
-  const initialGroup = settings.mode === "chinese-eight-ball" ? "open" : null;
-  const players: readonly [BilliardsPlayerState, BilliardsPlayerState] = [
-    { group: initialGroup, score: 0, seatId: seatIds[0] },
-    { group: initialGroup, score: 0, seatId: seatIds[1] },
-  ];
+  const firstSeatId = seatIds[0];
+  if (!firstSeatId || seatIds.length > 2 || new Set(seatIds).size !== seatIds.length) {
+    throw new TypeError("Billiards requires one or two distinct seats");
+  }
+  const practice = seatIds.length === 1;
+  const initialGroup = !practice && settings.mode === "chinese-eight-ball" ? "open" : null;
+  const players: readonly BilliardsPlayerState[] = seatIds.map((seatId) => ({
+    group: initialGroup,
+    score: 0,
+    seatId,
+  }));
   const balls = createInitialBalls(settings.mode).map((ball) =>
     ball.kind === "cue" ? { ...ball, pocketed: true } : ball,
   );
   return {
-    activeSeatId: seatIds[0],
+    activeSeatId: firstSeatId,
     ballInHandZone: settings.mode === "chinese-eight-ball" ? "behind-line" : "d",
     balls,
     breakShot: true,
@@ -139,10 +145,11 @@ export function createInitialBilliardsState(
     pendingDecision: null,
     phase: "ball_in_hand",
     players,
+    practice,
     seatIds,
     settings,
     shotNumber: 0,
-    snookerOn: settings.mode === "snooker" ? "red" : null,
+    snookerOn: !practice && settings.mode === "snooker" ? "red" : null,
   };
 }
 
@@ -150,7 +157,11 @@ export function rerackChineseEightBall(
   state: Readonly<BilliardsMatchState>,
   breakerSeatId: SeatId,
 ): BilliardsMatchState {
-  if (state.settings.mode !== "chinese-eight-ball" || !state.seatIds.includes(breakerSeatId)) {
+  if (
+    state.practice ||
+    state.settings.mode !== "chinese-eight-ball" ||
+    !state.seatIds.includes(breakerSeatId)
+  ) {
     throw new TypeError("Cannot rerack a non-Heyball match or assign an unknown breaker");
   }
   return {
@@ -169,7 +180,7 @@ export function rerackChineseEightBall(
       group: "open" as const,
       score: 0,
       seatId,
-    })) as unknown as BilliardsMatchState["players"],
+    })),
     snookerOn: null,
   };
 }

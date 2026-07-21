@@ -185,6 +185,10 @@ export class RoomRuntime {
         seat.reclaimable = false;
       }
 
+      if (this.#destroyEmptySoloPracticeRoom()) {
+        return;
+      }
+
       if (this.state.members.size === 0) {
         this.destroy("last_human_left", "最后一名真人已离开房间");
         return;
@@ -251,6 +255,13 @@ export class RoomRuntime {
       this.#requireExpectedRevision(expectedRevision);
       this.#requireLobbyLike();
       const member = this.#requireMember(memberId);
+      if (
+        this.state.practice &&
+        this.state.game.manifest.capabilities.soloPractice &&
+        this.state.seats.some((seat) => seat.occupant !== null)
+      ) {
+        throw new HttpError(409, "ROOM_INVALID_STATE", "单人练习房只允许一个玩家入座");
+      }
       if (
         [...this.state.seats].some(
           (seat) => seat.occupant?.kind === "human" && seat.occupant.accountId === member.accountId,
@@ -436,9 +447,13 @@ export class RoomRuntime {
       this.#requireLobbyLike();
       const occupied = this.state.seats.filter((seat) => seat.occupant !== null);
       const humans = occupied.filter((seat) => seat.occupant?.kind === "human");
+      const minimumPlayers =
+        this.state.practice && this.state.game.manifest.capabilities.soloPractice
+          ? 1
+          : this.state.game.manifest.minPlayers;
       if (
         humans.length === 0 ||
-        occupied.length < this.state.game.manifest.minPlayers ||
+        occupied.length < minimumPlayers ||
         occupied.length > this.state.game.manifest.maxPlayers ||
         humans.some((seat) => seat.occupant?.kind === "human" && !seat.occupant.ready)
       ) {
@@ -1000,10 +1015,13 @@ export class RoomRuntime {
           this.#hooks.onMemberRemoved(member);
           if (!seatAfterEvent) {
             this.state.members.delete(member.memberId);
-            if (this.state.members.size === 0) {
-              this.destroy("last_human_left", "最后一名真人已离开房间");
-              return;
-            }
+          }
+          if (this.#destroyEmptySoloPracticeRoom()) {
+            return;
+          }
+          if (this.state.members.size === 0) {
+            this.destroy("last_human_left", "最后一名真人已离开房间");
+            return;
           }
           if (this.state.hostMemberId === member.memberId) {
             this.#transferHostToConnectedMember(member.memberId);
@@ -1023,7 +1041,7 @@ export class RoomRuntime {
     const lobbyLike = this.state.status !== "playing";
     return {
       botAddableSeatIds:
-        isHost && lobbyLike
+        isHost && lobbyLike && this.state.game.manifest.capabilities.bots
           ? this.state.seats.filter((seat) => seat.occupant === null).map((seat) => seat.seatId)
           : [],
       botRemovableSeatIds:
@@ -1041,7 +1059,13 @@ export class RoomRuntime {
       canTransferHost: isHost,
       canUpdateSettings: isHost && lobbyLike,
       claimableSeatIds:
-        !ownSeat && lobbyLike
+        !ownSeat &&
+        lobbyLike &&
+        !(
+          this.state.practice &&
+          this.state.game.manifest.capabilities.soloPractice &&
+          this.state.seats.some((seat) => seat.occupant !== null)
+        )
           ? this.state.seats.filter((seat) => seat.occupant === null).map((seat) => seat.seatId)
           : [],
       kickableMemberIds: isHost
@@ -1158,6 +1182,18 @@ export class RoomRuntime {
     return this.state.seats.find(
       (seat) => seat.occupant?.kind === "human" && seat.occupant.memberId === memberId,
     );
+  }
+
+  #destroyEmptySoloPracticeRoom(): boolean {
+    if (
+      !this.state.practice ||
+      !this.state.game.manifest.capabilities.soloPractice ||
+      this.state.seats.some((seat) => seat.occupant !== null)
+    ) {
+      return false;
+    }
+    this.destroy("last_human_left", "最后一名练习玩家已离开房间");
+    return true;
   }
 
   #ensureOpen(): void {

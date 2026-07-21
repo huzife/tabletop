@@ -495,6 +495,10 @@
   padding-top: 11px;
 }
 
+.billiards-action-row.is-practice {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .billiards-action-row .ui-button {
   min-width: 0;
   padding-left: 10px;
@@ -696,6 +700,10 @@
 
   .billiards-controls {
     grid-template-columns: minmax(0, 1fr) 92px;
+  }
+
+  .billiards-settings__modes {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

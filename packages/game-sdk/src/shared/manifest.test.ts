@@ -10,11 +10,35 @@ const capabilities = {
   timers: false,
   hiddenInformation: false,
   bots: false,
+  soloPractice: false,
   temporaryController: false,
   manualSeatReclaim: false,
 } as const;
 
 describe("game shared contracts", () => {
+  it("defaults the additive solo-practice capability for v1 manifests", () => {
+    const { soloPractice } = defineGameManifestV1({
+      apiVersion: 1,
+      capabilities: {
+        bots: false,
+        hiddenInformation: false,
+        manualSeatReclaim: false,
+        midgameJoin: false,
+        spectators: true,
+        temporaryController: false,
+        timers: false,
+      },
+      description: "",
+      displayName: "Test",
+      gameId: "test-default-capability",
+      interactionMode: "turn_based",
+      maxPlayers: 2,
+      minPlayers: 2,
+    }).capabilities;
+
+    expect(soloPractice).toBe(false);
+  });
+
   it("validates manifest player ranges and ids", () => {
     expect(() =>
       defineGameManifestV1({

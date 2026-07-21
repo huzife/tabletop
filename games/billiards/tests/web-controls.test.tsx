@@ -243,6 +243,54 @@ describe("billiards result labels", () => {
   });
 });
 
+describe("billiards solo practice labels", () => {
+  it("keeps practice language free of foul and opponent terminology", () => {
+    const seatId = seatIdSchema.parse("seat-1");
+    const view = viewFixture({
+      lastShot: {
+        foulCode: "NO_BALL_CONTACT",
+        points: 0,
+        pottedBallIds: ["cue", "1"],
+        seatId,
+      },
+      players: [{ active: true, group: "open", score: 1, seatId }],
+      practice: true,
+    });
+
+    expect(phaseLabel(view)).toBe("练习击球");
+    expect(noticeLabel(view)).toBe("本杆进球 1 颗 · 继续击球");
+    expect(noticeLabel(view)).not.toContain("犯规");
+  });
+
+  it("does not count a cue-only scratch as a potted practice ball", () => {
+    const seatId = seatIdSchema.parse("seat-1");
+    const view = viewFixture({
+      lastShot: {
+        foulCode: "CUE_BALL_POTTED",
+        points: 0,
+        pottedBallIds: ["cue"],
+        seatId,
+      },
+      players: [{ active: true, group: null, score: 0, seatId }],
+      practice: true,
+    });
+
+    expect(noticeLabel(view)).toBe("继续击球");
+  });
+
+  it("prompts the player to place a scratched cue ball and continue", () => {
+    const view = viewFixture({
+      ballInHandZone: "anywhere",
+      phase: "ball_in_hand",
+      practice: true,
+      shotNumber: 2,
+    });
+
+    expect(phaseLabel(view)).toBe("摆放母球");
+    expect(noticeLabel(view)).toBe("母球落袋，请摆放母球继续");
+  });
+});
+
 function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
   const firstSeat = seatIdSchema.parse("seat-1");
   const secondSeat = seatIdSchema.parse("seat-2");
@@ -264,6 +312,7 @@ function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
     outcome: null,
     pendingDecision: null,
     phase: "aiming",
+    practice: false,
     players: [
       { active: true, group: "open", score: 0, seatId: firstSeat },
       { active: false, group: "open", score: 0, seatId: secondSeat },

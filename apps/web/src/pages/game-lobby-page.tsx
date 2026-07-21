@@ -63,6 +63,8 @@ function GameLobbyContent({
   const [createError, setCreateError] = useState("");
   const rooms = roomsQuery.data?.rooms ?? [];
   const SettingsEditor = gameModule.SettingsEditor;
+  const hasBotProfiles = game.botProfiles.length > 0;
+  const practiceAvailable = game.capabilities.bots || game.capabilities.soloPractice;
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,7 +76,7 @@ function GameLobbyContent({
     }
     try {
       const created = await createRoom.mutateAsync({
-        ...(mode === "practice" ? { botProfileId: practiceBotProfileId } : {}),
+        ...(mode === "practice" && hasBotProfiles ? { botProfileId: practiceBotProfileId } : {}),
         gameId: game.gameId,
         name: roomName,
         ...(mode === "online" && password ? { password } : {}),
@@ -147,7 +149,7 @@ function GameLobbyContent({
                 </button>
                 <button
                   aria-pressed={mode === "practice"}
-                  disabled={!game.capabilities.bots}
+                  disabled={!practiceAvailable}
                   onClick={() => setMode("practice")}
                   type="button"
                 >
@@ -155,7 +157,7 @@ function GameLobbyContent({
                 </button>
               </div>
             </fieldset>
-            {mode === "practice" ? (
+            {mode === "practice" && hasBotProfiles ? (
               <label className="select-field">
                 <span>AI 难度</span>
                 <select
@@ -196,7 +198,7 @@ function GameLobbyContent({
                 !game.enabled ||
                 createRoom.isPending ||
                 !roomName.trim() ||
-                (mode === "practice" && !practiceBotProfileId)
+                (mode === "practice" && hasBotProfiles && !practiceBotProfileId)
               }
               type="submit"
             >

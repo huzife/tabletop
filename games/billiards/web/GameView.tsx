@@ -182,14 +182,18 @@ export function BilliardsGameView({
           <header className="billiards-panel__header">
             <div>
               <span className="billiards-panel__eyebrow">
-                {formatBilliardsMode(view.mode)} · 第 {view.shotNumber + 1} 杆
+                {formatBilliardsMode(view.mode)}
+                {view.practice ? " · 单人练习" : ""} · 第 {view.shotNumber + 1} 杆
               </span>
               <strong>{phaseLabel(view)}</strong>
             </div>
             <ConnectionStatus state={connectionState} />
           </header>
 
-          <section className="billiards-players" aria-label="玩家比分">
+          <section
+            className="billiards-players"
+            aria-label={view.practice ? "练习统计" : "玩家比分"}
+          >
             {view.players.map((player, index) => (
               <div
                 className={player.active ? "billiards-player is-active" : "billiards-player"}
@@ -206,7 +210,9 @@ export function BilliardsGameView({
                   <strong>
                     {player.seatId === view.viewerSeatId ? "你" : `玩家 ${index + 1}`}
                   </strong>
-                  <small>{playerGroupLabel(view.mode, player.group)}</small>
+                  <small>
+                    {view.practice ? "连续击球" : playerGroupLabel(view.mode, player.group)}
+                  </small>
                 </span>
                 <strong className="billiards-player__score">{player.score}</strong>
               </div>
@@ -236,7 +242,7 @@ export function BilliardsGameView({
                 suffix="°"
                 value={elevation}
               />
-              {view.mode === "snooker" && view.snookerOn === "color" ? (
+              {!view.practice && view.mode === "snooker" && view.snookerOn === "color" ? (
                 <ColorNomination
                   disabled={shotControlsDisabled}
                   onChange={setNominatedColor}
@@ -257,7 +263,9 @@ export function BilliardsGameView({
             />
           )}
 
-          <div className="billiards-action-row">
+          <div
+            className={view.practice ? "billiards-action-row is-practice" : "billiards-action-row"}
+          >
             <Button
               className="billiards-shoot"
               disabled={disabled || !view.legalActions.canShoot}
@@ -271,15 +279,17 @@ export function BilliardsGameView({
               )}
               <span>出杆</span>
             </Button>
-            <Button
-              className="billiards-resign"
-              disabled={disabled || !view.legalActions.canResign}
-              onClick={() => dispatchAction({ type: "billiards.resign" })}
-              variant="danger"
-            >
-              <Flag aria-hidden="true" size={16} />
-              <span>认输</span>
-            </Button>
+            {!view.practice ? (
+              <Button
+                className="billiards-resign"
+                disabled={disabled || !view.legalActions.canResign}
+                onClick={() => dispatchAction({ type: "billiards.resign" })}
+                variant="danger"
+              >
+                <Flag aria-hidden="true" size={16} />
+                <span>认输</span>
+              </Button>
+            ) : null}
           </div>
 
           <div aria-live="polite" className="billiards-notice">
@@ -1028,9 +1038,17 @@ export function canActOnDecision(
 
 export function noticeLabel(view: BilliardsView): string {
   if (view.phase === "ball_in_hand") {
+    if (view.practice) {
+      return view.shotNumber > 0 ? "母球落袋，请摆放母球继续" : "摆放母球开始练习";
+    }
     if (view.ballInHandZone === "d") return "母球：D 区";
     if (view.ballInHandZone === "behind-line") return "母球：发球线后";
     return "母球：自由球";
+  }
+  if (view.practice) {
+    if (view.lastShot === null) return "调整击球参数后开始练习";
+    const pottedCount = view.lastShot.pottedBallIds.filter((ballId) => ballId !== "cue").length;
+    return pottedCount > 0 ? `本杆进球 ${pottedCount} 颗 · 继续击球` : "继续击球";
   }
   const decision = view.pendingDecision ?? null;
   if (view.phase === "decision" && decision !== null) {
@@ -1049,6 +1067,7 @@ export function noticeLabel(view: BilliardsView): string {
 export function phaseLabel(view: BilliardsView): string {
   if (view.outcome !== null) return "本局结束";
   if (view.phase === "ball_in_hand") {
+    if (view.practice) return "摆放母球";
     return view.ballInHandZone === "behind-line" ? "发球线后摆球" : "摆放母球";
   }
   if (view.phase === "decision") {
@@ -1064,6 +1083,7 @@ export function phaseLabel(view: BilliardsView): string {
     }
     return "等待裁定";
   }
+  if (view.practice) return "练习击球";
   if (view.activeSeatId === null) return "等待玩家";
   return view.activeSeatId === view.viewerSeatId ? "轮到你" : "对手回合";
 }

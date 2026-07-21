@@ -51,6 +51,7 @@ describe("protocol primitives", () => {
         timers: false,
         hiddenInformation: false,
         bots: false,
+        soloPractice: false,
         temporaryController: false,
         manualSeatReclaim: false,
       },

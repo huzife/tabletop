@@ -14,6 +14,7 @@ export const gomokuManifest = defineGameManifestV1({
     timers: true,
     hiddenInformation: false,
     bots: true,
+    soloPractice: false,
     temporaryController: true,
     manualSeatReclaim: false,
   },

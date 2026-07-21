@@ -14,6 +14,7 @@ import {
   markCueBallInHand,
   newlyPottedBalls,
   otherSeat,
+  requireCompetitivePlayers,
   SNOOKER_COLOR_VALUES,
   SNOOKER_COLORS_ASCENDING,
 } from "./common.js";
@@ -138,7 +139,8 @@ function finalBlackResolution(
   points: number,
   random: GameRandomV1,
 ): AdjudicatedBilliardsShot {
-  const tie = players[0].score === players[1].score;
+  const [firstPlayer, secondPlayer] = requireCompetitivePlayers(players);
+  const tie = firstPlayer.score === secondPlayer.score;
   const base: BilliardsMatchState = {
     ...state,
     balls,
@@ -180,7 +182,8 @@ function finalBlackResolution(
       },
     };
   }
-  const winnerSeatId = players[0].score > players[1].score ? players[0].seatId : players[1].seatId;
+  const winnerSeatId =
+    firstPlayer.score > secondPlayer.score ? firstPlayer.seatId : secondPlayer.seatId;
   const ended = endState(
     { ...base, decidingBlack: false, phase: "aiming", snookerOn: "black" },
     winnerSeatId,

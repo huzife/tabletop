@@ -41,20 +41,18 @@ export function markCueBallInHand(balls: readonly BilliardsBall[]): readonly Bil
 }
 
 export function updatePlayer(
-  players: readonly [BilliardsPlayerState, BilliardsPlayerState],
+  players: readonly BilliardsPlayerState[],
   seatId: SeatId,
   update: (player: Readonly<BilliardsPlayerState>) => BilliardsPlayerState,
-): readonly [BilliardsPlayerState, BilliardsPlayerState] {
-  return players.map((player) =>
-    player.seatId === seatId ? update(player) : player,
-  ) as unknown as readonly [BilliardsPlayerState, BilliardsPlayerState];
+): readonly BilliardsPlayerState[] {
+  return players.map((player) => (player.seatId === seatId ? update(player) : player));
 }
 
 export function addScore(
-  players: readonly [BilliardsPlayerState, BilliardsPlayerState],
+  players: readonly BilliardsPlayerState[],
   seatId: SeatId,
   points: number,
-): readonly [BilliardsPlayerState, BilliardsPlayerState] {
+): readonly BilliardsPlayerState[] {
   return updatePlayer(players, seatId, (player) => ({
     ...player,
     score: player.score + points,
@@ -63,6 +61,17 @@ export function addScore(
 
 export function scoreFor(players: readonly BilliardsPlayerState[], seatId: SeatId): number {
   return players.find((player) => player.seatId === seatId)?.score ?? 0;
+}
+
+export function requireCompetitivePlayers(
+  players: readonly BilliardsPlayerState[],
+): readonly [BilliardsPlayerState, BilliardsPlayerState] {
+  const first = players[0];
+  const second = players[1];
+  if (!first || !second || players.length !== 2) {
+    throw new TypeError("Competitive billiards requires two players");
+  }
+  return [first, second];
 }
 
 export function endState(

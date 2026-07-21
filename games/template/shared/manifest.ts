@@ -8,6 +8,7 @@ export const templateManifest = defineGameManifestV1({
     hiddenInformation: false,
     manualSeatReclaim: false,
     midgameJoin: false,
+    soloPractice: false,
     spectators: true,
     temporaryController: false,
     timers: false,

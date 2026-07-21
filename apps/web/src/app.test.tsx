@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RouterProvider, createMemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppRoutes } from "./app";
@@ -48,13 +48,56 @@ describe("web routes", () => {
     expect(screen.getByRole("heading", { name: "选择一张游戏桌" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "退出登录" })).toBeEnabled();
   });
+
+  it("advertises solo practice games in the catalog", async () => {
+    vi.stubGlobal("fetch", createFetchMock("user", { games: [soloBilliardsCatalogEntry()] }));
+
+    renderAt("/");
+
+    expect(await screen.findByRole("heading", { name: "台球" })).toBeInTheDocument();
+    expect(screen.getByText("单人练习")).toBeInTheDocument();
+  });
+
+  it("creates solo practice without showing or submitting an AI profile", async () => {
+    let createRoomBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock("user", {
+        games: [soloBilliardsCatalogEntry()],
+        onCreateRoom: (body) => {
+          createRoomBody = body;
+        },
+      }),
+    );
+
+    renderAt("/games/billiards");
+    expect(await screen.findByRole("heading", { name: "台球" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "单人练习" }));
+
+    expect(screen.getByLabelText("房间密码（可选）")).toBeDisabled();
+    expect(screen.queryByText("AI 难度")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
+
+    await waitFor(() => expect(createRoomBody).toBeDefined());
+    expect(createRoomBody).toMatchObject({
+      gameId: "billiards",
+      practice: true,
+      settings: { mode: "chinese-eight-ball" },
+    });
+    expect(createRoomBody).not.toHaveProperty("botProfileId");
+  });
 });
 
 function createFetchMock(
   role: "admin" | "user" | null,
-  options: { readonly logoutFails?: boolean } = {},
+  options: {
+    readonly games?: readonly unknown[];
+    readonly logoutFails?: boolean;
+    readonly onCreateRoom?: (body: Record<string, unknown>) => void;
+  } = {},
 ) {
-  return vi.fn(async (input: RequestInfo | URL) => {
+  return vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
     if (url.endsWith("/auth/session")) {
       if (role === null) {
@@ -103,10 +146,47 @@ function createFetchMock(
           )
         : new Response(null, { status: 204 });
     }
-    if (url.endsWith("/games")) return jsonResponse({ games: [] });
+    if (url.endsWith("/games")) return jsonResponse({ games: options.games ?? [] });
+    if (url.endsWith("/rooms") && init.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      options.onCreateRoom?.(body);
+      return jsonResponse(
+        {
+          inviteUrl: "https://tabletop.test/invite/test-invite-token-1234",
+          joinTicket: "test-join-ticket-1234567890",
+          joinTicketExpiresAt: "2026-08-15T10:00:00.000Z",
+          roomId: "room-test",
+        },
+        201,
+      );
+    }
     if (url.includes("/rooms")) return jsonResponse({ rooms: [] });
     throw new Error(`unexpected request: ${url}`);
   });
+}
+
+function soloBilliardsCatalogEntry() {
+  return {
+    apiVersion: 1,
+    botProfiles: [],
+    capabilities: {
+      bots: false,
+      hiddenInformation: false,
+      manualSeatReclaim: false,
+      midgameJoin: false,
+      soloPractice: true,
+      spectators: true,
+      temporaryController: false,
+      timers: false,
+    },
+    description: "支持单人练习的台球游戏",
+    displayName: "台球",
+    enabled: true,
+    gameId: "billiards",
+    interactionMode: "turn_based",
+    maxPlayers: 2,
+    minPlayers: 2,
+  };
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

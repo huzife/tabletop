@@ -58,7 +58,9 @@ export function HomePage() {
                       : `${game.minPlayers} - ${game.maxPlayers} 人`}
                   </span>
                   <span>在线对局</span>
-                  {game.capabilities.bots ? <span>单人练习</span> : null}
+                  {game.capabilities.bots || game.capabilities.soloPractice ? (
+                    <span>单人练习</span>
+                  ) : null}
                 </div>
               </div>
               {game.enabled ? (

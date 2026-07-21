@@ -12,6 +12,7 @@ import {
   resolveEightBallGroupChoice,
 } from "./rules/eight-ball.js";
 import { placeCueBall, validateCuePlacement } from "./rules/placement.js";
+import { adjudicatePracticeShot } from "./rules/practice.js";
 import { adjudicateSnookerShot, resolveSnookerDecidingBlackChoice } from "./rules/snooker.js";
 import { createInitialBilliardsState } from "./setup.js";
 import type {
@@ -33,18 +34,15 @@ export function createBilliardsMatch(
   context: Readonly<CreateMatchContextV1>,
   settings: Readonly<BilliardsSettings>,
 ): BilliardsMatchState {
-  const first = context.seats[0]?.seatId;
-  const second = context.seats[1]?.seatId;
+  const seatIds = context.seats.map(({ seatId }) => seatId);
   if (
-    !first ||
-    !second ||
-    first === second ||
-    context.seats.length !== 2 ||
+    (context.seats.length !== 1 && context.seats.length !== 2) ||
+    new Set(seatIds).size !== context.seats.length ||
     context.seats.some(({ controller }) => controller.kind !== "human")
   ) {
-    throw new GameRuleError("REQUIRES_TWO_PLAYERS");
+    throw new GameRuleError("REQUIRES_ONE_OR_TWO_HUMANS");
   }
-  return createInitialBilliardsState(settings, [first, second]);
+  return createInitialBilliardsState(settings, seatIds);
 }
 
 export function getBilliardsActiveSeatIds(state: Readonly<BilliardsMatchState>): readonly SeatId[] {
@@ -93,6 +91,7 @@ function transitionForShot(
   const cue = state.balls.find((ball) => ball.kind === "cue");
   if (!cue || cue.pocketed) throw new GameRuleError("PLACE_CUE_FIRST");
   if (
+    !state.practice &&
     state.settings.mode === "snooker" &&
     state.snookerOn === "color" &&
     action.shot.nominatedColor === null
@@ -106,8 +105,9 @@ function transitionForShot(
     mode: state.settings.mode,
     shot: action.shot,
   }) as BilliardsSimulationResult;
-  const resolution =
-    state.settings.mode === "chinese-eight-ball"
+  const resolution = state.practice
+    ? adjudicatePracticeShot({ actorSeatId, shot: action.shot, simulation, state })
+    : state.settings.mode === "chinese-eight-ball"
       ? adjudicateChineseEightBallShot({ actorSeatId, shot: action.shot, simulation, state })
       : adjudicateSnookerShot({
           actorSeatId,
@@ -156,6 +156,7 @@ export function handleBilliardsAction(
 ) {
   if (state.phase === "ended" || state.outcome !== null) throw new GameRuleError("MATCH_ENDED");
   if (action.type === "billiards.resign") {
+    if (state.practice) throw new GameRuleError("RESIGN_NOT_AVAILABLE_IN_PRACTICE");
     if (context.actor.kind !== "human" || !state.seatIds.includes(context.actor.seatId)) {
       throw new GameRuleError("PLAYER_ONLY");
     }
@@ -239,6 +240,17 @@ export function handleBilliardsSystemEvent(
   ) {
     return { kind: "noop" as const, state };
   }
+  if (state.practice) {
+    if (event.type === "connection.grace_expired") {
+      return {
+        kind: "applied" as const,
+        events: [],
+        roomDirectives: [{ seatId: event.seatId, type: "seat.release" as const }],
+        state,
+      };
+    }
+    return { kind: "noop" as const, state };
+  }
   if (event.type !== "connection.grace_expired" && event.type !== "member.left") {
     return { kind: "noop" as const, state };
   }
@@ -296,7 +308,7 @@ export function projectBilliardsView(
         state.phase === "decision" &&
         state.pendingDecision?.type === "choose-group",
       canPlaceCue: viewerIsCurrent && state.phase === "ball_in_hand",
-      canResign: viewerIsPlayer && state.phase !== "ended",
+      canResign: !state.practice && viewerIsPlayer && state.phase !== "ended",
       canResolveBreak:
         viewerIsCurrent &&
         state.phase === "decision" &&
@@ -327,6 +339,7 @@ export function projectBilliardsView(
       score: player.score,
       seatId: player.seatId,
     })),
+    practice: state.practice,
     shotNumber: state.shotNumber,
     snookerOn: state.snookerOn,
     table: {

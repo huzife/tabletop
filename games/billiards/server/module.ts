@@ -26,10 +26,14 @@ export const billiardsServerModule = defineGameServerModuleV1<
   shared: billiardsShared,
   lobby: {
     getSeatDefinitions: () => createDefaultSeatDefinitionsV1(2),
-    validateStart: ({ seats }) =>
-      seats.length === 2 && seats.every(({ occupant }) => occupant === "human")
+    validateStart: ({ seats }) => {
+      const humanCount = seats.filter(({ occupant }) => occupant === "human").length;
+      return seats.length === 2 &&
+        seats.every(({ occupant }) => occupant !== "bot") &&
+        (humanCount === 1 || humanCount === 2)
         ? { ok: true }
-        : { ok: false, ruleCode: "REQUIRES_TWO_PLAYERS" },
+        : { ok: false, ruleCode: "REQUIRES_ONE_OR_TWO_HUMANS" };
+    },
   },
   createMatch: createBilliardsMatch,
   handleAction: handleBilliardsAction,
