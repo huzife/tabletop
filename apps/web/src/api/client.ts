@@ -227,12 +227,16 @@ export const roomConnectionApi = {
       method: "DELETE",
     });
   },
-  command(connectionId: ConnectionId, input: ClientCommand) {
+  command(connectionId: ConnectionId, input: ClientCommand, signal?: AbortSignal) {
     const command = clientCommandSchema.parse(input);
     return request(
       `/room-connections/${encodeURIComponent(connectionId)}/commands`,
       roomConnectionCommandResponseSchema,
-      { body: jsonBody(command), method: "POST" },
+      {
+        body: jsonBody(command),
+        method: "POST",
+        ...(signal === undefined ? {} : { signal }),
+      },
     );
   },
   open(signal?: AbortSignal): Promise<RoomConnectionOpenResponse> {

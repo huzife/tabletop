@@ -289,6 +289,21 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
     });
   }
 
+  function dispatchTransientEvent(event: JsonObject & { readonly type: string }) {
+    if (
+      snapshot === null ||
+      snapshot.matchId === undefined ||
+      gameModule === undefined ||
+      !connected ||
+      !payload?.permissions.canSubmitGameAction
+    ) {
+      return;
+    }
+    const parsed = gameModule.shared.transientEventSchema?.safeParse(event);
+    if (parsed?.success !== true) return;
+    socket.sendTransientEvent(snapshot.matchId, parsed.data);
+  }
+
   async function copyInvite() {
     if (entry.inviteUrl === undefined) {
       setLocalNotice("当前入房入口没有可转发的邀请链接");
@@ -651,9 +666,11 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
                 actionPending={gameActionPending}
                 connectionState={gameConnectionState}
                 dispatchAction={dispatchGameAction}
+                dispatchTransientEvent={dispatchTransientEvent}
                 displayEvents={payload.displayEvents}
                 key={snapshot.matchId ?? "no-match"}
                 readOnly={!payload.permissions.canSubmitGameAction || commandBusy || !connected}
+                transientEvent={socket.transientEvent}
                 view={payload.gameView}
               />
             </div>

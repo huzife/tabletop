@@ -7,6 +7,7 @@ import {
   type GameSystemEventV1,
   type HostedGameTransitionV1,
 } from "@tabletop/game-sdk/server";
+import type { GameTransientEventV1 } from "@tabletop/game-sdk";
 import {
   accountIdSchema,
   matchIdSchema,
@@ -560,6 +561,28 @@ export class RoomRuntime {
       const events = this.#consumeTransition(transition);
       this.#changed(events);
       return true;
+    });
+  }
+
+  gameTransient(
+    memberId: MemberId,
+    eventInput: unknown,
+    matchId: string,
+  ): Promise<{ readonly event: GameTransientEventV1; readonly senderSeatId: SeatId }> {
+    return this.queue.run(() => {
+      const match = this.#requireMatch(matchId);
+      const seat = this.#seatForMember(memberId);
+      if (!seat || seat.controller?.kind !== "human") {
+        throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前连接没有游戏操作权");
+      }
+      if (!this.state.game.getActiveSeatIds(match.state).includes(seat.seatId)) {
+        throw new HttpError(403, "ROOM_PERMISSION_DENIED", "只有当前行动玩家可以同步临时状态");
+      }
+      const event = this.state.game.parseTransientEvent(eventInput);
+      if (event === null) {
+        throw new HttpError(400, "VALIDATION_FAILED", "当前游戏不支持临时状态同步");
+      }
+      return { event, senderSeatId: seat.seatId };
     });
   }
 

@@ -4,11 +4,14 @@ import {
   roomIdSchema,
   serverMessageSchema,
   type ClientCommand,
+  type GameTransientCommand,
   type JsonObject,
+  type MatchId,
   type RequestId,
   type RoomJoinCommand,
   type RoomResumeCommand,
   type RoomSnapshotMessage,
+  type SeatId,
 } from "@tabletop/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -18,9 +21,14 @@ import { RoomLongPollingTransport, type LongPollingTransportClose } from "./long
 
 const RECONNECT_WINDOW_MS = 30_000;
 const RECONNECT_DELAYS_MS = [0, 500, 1_000, 2_000, 3_000, 5_000] as const;
+const TRANSIENT_BACKPRESSURE_RETRY_MS = 250;
+const WEB_SOCKET_TRANSIENT_BACKPRESSURE_BYTES = 64 * 1024;
 const WEB_SOCKET_ESTABLISH_TIMEOUT_MS = 5_000;
 
-type ManagedCommand = Exclude<ClientCommand, RoomJoinCommand | RoomResumeCommand>;
+type ManagedCommand = Exclude<
+  ClientCommand,
+  RoomJoinCommand | RoomResumeCommand | GameTransientCommand
+>;
 type StripManagedEnvelope<T> = T extends ManagedCommand
   ? Omit<T, "protocol" | "requestId" | "roomId">
   : never;
@@ -40,6 +48,13 @@ export interface ParsedRoomSnapshot extends RoomSnapshotMessage {
   readonly payload: RoomSnapshotMessage["payload"];
 }
 
+export interface ParsedGameTransientEvent {
+  readonly event: GameTransientCommand["payload"];
+  readonly matchId: MatchId;
+  readonly senderSeatId: SeatId;
+  readonly serverTime: string;
+}
+
 export interface UseRoomSocketResult {
   readonly clearError: () => void;
   readonly connectionStatus: RoomConnectionStatus;
@@ -47,7 +62,12 @@ export interface UseRoomSocketResult {
   readonly pendingCommandTypes: readonly ClientCommand["type"][];
   readonly retry: () => void;
   readonly sendCommand: (command: RoomCommandInput) => RequestId | null;
+  readonly sendTransientEvent: (
+    matchId: MatchId,
+    event: GameTransientCommand["payload"],
+  ) => RequestId | null;
   readonly snapshot: ParsedRoomSnapshot | null;
+  readonly transientEvent: ParsedGameTransientEvent | null;
 }
 
 function createRequestId(): RequestId {
@@ -96,6 +116,7 @@ export function useRoomSocket(
     ReadonlyMap<RequestId, ClientCommand["type"]>
   >(new Map());
   const [snapshot, setSnapshot] = useState<ParsedRoomSnapshot | null>(null);
+  const [transientEvent, setTransientEvent] = useState<ParsedGameTransientEvent | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const initialJoinCommandRef = useRef<ClientCommand | null>(null);
   const entryStateRef = useRef({
@@ -106,6 +127,9 @@ export function useRoomSocket(
     ticketFallbackAttempted: false,
   });
   const sendCommandRef = useRef<(command: RoomCommandInput) => RequestId | null>(() => null);
+  const sendTransientEventRef = useRef<
+    (matchId: MatchId, event: GameTransientCommand["payload"]) => RequestId | null
+  >(() => null);
   const retryRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
@@ -126,7 +150,15 @@ export function useRoomSocket(
     let polling: RoomLongPollingTransport | null = null;
     let preferLongPolling = false;
     let currentTransportHadSnapshot = false;
+    let currentMatchId: MatchId | undefined;
+    let currentGameModule: ReturnType<typeof webGameRegistry.get>;
+    let currentTransientEvent: ParsedGameTransientEvent | null = null;
+    let pendingTransientEvent: ParsedGameTransientEvent | null = null;
+    let queuedTransient: GameTransientCommand | null = null;
+    let transientSendTimer: number | undefined;
+    let lastTransientSentAt = 0;
     const sentCommands = new Map<RequestId, ClientCommand>();
+    const transientRequests = new Set<RequestId>();
     const pending = new Map<RequestId, ClientCommand["type"]>();
     const entryState = entryStateRef.current;
 
@@ -168,6 +200,10 @@ export function useRoomSocket(
       pending.clear();
       publishPending();
     };
+    const publishTransientEvent = (event: ParsedGameTransientEvent | null) => {
+      currentTransientEvent = event;
+      setTransientEvent(event);
+    };
     const rememberCommand = (command: ClientCommand, userCommand: boolean) => {
       sentCommands.set(command.requestId, command);
       if (sentCommands.size > 128) {
@@ -188,12 +224,51 @@ export function useRoomSocket(
       }
       return polling?.send(command) ?? false;
     };
+    const clearQueuedTransient = () => {
+      queuedTransient = null;
+      if (transientSendTimer !== undefined) window.clearTimeout(transientSendTimer);
+      transientSendTimer = undefined;
+    };
+    const flushTransient = () => {
+      transientSendTimer = undefined;
+      const command = queuedTransient;
+      if (command === null || !isTransportOpen()) return;
+      if (
+        isWebSocketOpen() &&
+        socket !== null &&
+        socket.bufferedAmount >= WEB_SOCKET_TRANSIENT_BACKPRESSURE_BYTES
+      ) {
+        transientSendTimer = window.setTimeout(flushTransient, TRANSIENT_BACKPRESSURE_RETRY_MS);
+        return;
+      }
+      queuedTransient = null;
+      lastTransientSentAt = Date.now();
+      transientRequests.add(command.requestId);
+      if (transientRequests.size > 128) {
+        const oldest = transientRequests.values().next().value;
+        if (oldest !== undefined) transientRequests.delete(oldest);
+      }
+      sendTransport(command);
+    };
+    const sendTransient = (command: GameTransientCommand): boolean => {
+      if (!isTransportOpen()) return false;
+      queuedTransient = command;
+      const intervalMs = isWebSocketOpen() ? 80 : 250;
+      const delayMs = Math.max(0, lastTransientSentAt + intervalMs - Date.now());
+      if (transientSendTimer === undefined) {
+        if (delayMs === 0) flushTransient();
+        else transientSendTimer = window.setTimeout(flushTransient, delayMs);
+      }
+      return true;
+    };
     const closeTransport = (code: number, reason: string) => {
+      clearQueuedTransient();
       socket?.close(code, reason);
       polling?.close();
     };
     const sendParsed = (command: ClientCommand, userCommand: boolean): boolean => {
       if (!isTransportOpen()) return false;
+      clearQueuedTransient();
       rememberCommand(command, userCommand);
       return sendTransport(command);
     };
@@ -261,6 +336,7 @@ export function useRoomSocket(
         failProtocol("游戏插件拒绝了服务端返回的房间状态");
         return null;
       }
+      currentGameModule = gameModule;
       return { ...message, payload: payload.data };
     };
 
@@ -284,10 +360,12 @@ export function useRoomSocket(
           sendEntryCommand();
           break;
         case "command.ack":
+          transientRequests.delete(message.causedBy);
           removePending(message.causedBy);
           sentCommands.delete(message.causedBy);
           break;
         case "command.error": {
+          if (transientRequests.delete(message.causedBy)) break;
           const failedCommand = sentCommands.get(message.causedBy);
           removePending(message.causedBy);
           sentCommands.delete(message.causedBy);
@@ -319,6 +397,7 @@ export function useRoomSocket(
           }
           if (message.payload.resyncRequired && failedCommand !== undefined) {
             // The gateway treats a repeated request ID as a snapshot request without applying it twice.
+            clearQueuedTransient();
             sendTransport(failedCommand);
           }
           const commandError = socketError(message.payload.code, message.payload.message, {
@@ -336,6 +415,13 @@ export function useRoomSocket(
         case "room.snapshot": {
           const nextSnapshot = parseSnapshot(message);
           if (nextSnapshot === null) return;
+          currentMatchId = nextSnapshot.matchId;
+          if (pendingTransientEvent?.matchId === currentMatchId) {
+            publishTransientEvent(pendingTransientEvent);
+          } else if (currentTransientEvent?.matchId !== currentMatchId) {
+            publishTransientEvent(null);
+          }
+          pendingTransientEvent = null;
           setSnapshot((current) =>
             current !== null && current.revision >= nextSnapshot.revision ? current : nextSnapshot,
           );
@@ -355,10 +441,32 @@ export function useRoomSocket(
           setError((current) => (current?.code.startsWith("SOCKET_") === true ? null : current));
           break;
         }
+        case "game.transient": {
+          if (message.roomId !== roomId) break;
+          const belongsToCurrentMatch = message.matchId === currentMatchId;
+          const schema = currentGameModule?.shared.transientEventSchema;
+          if (schema === undefined) break;
+          const event = schema.safeParse(message.payload.event);
+          if (!event.success) {
+            failProtocol("游戏插件拒绝了服务端返回的临时状态");
+            return;
+          }
+          const nextTransientEvent = {
+            event: event.data,
+            matchId: message.matchId,
+            senderSeatId: message.payload.senderSeatId,
+            serverTime: message.serverTime,
+          };
+          if (belongsToCurrentMatch) publishTransientEvent(nextTransientEvent);
+          else pendingTransientEvent = nextTransientEvent;
+          break;
+        }
         case "room.closed":
           intentionalClose = true;
           clearPending();
           setConnectionStatus("closed");
+          pendingTransientEvent = null;
+          publishTransientEvent(null);
           setError(socketError("ROOM_CLOSED", message.payload.message));
           closeTransport(1000, "房间已关闭");
           break;
@@ -398,6 +506,10 @@ export function useRoomSocket(
 
     const handleTransportClose = (event: LongPollingTransportClose) => {
       clearPending();
+      clearQueuedTransient();
+      transientRequests.clear();
+      pendingTransientEvent = null;
+      publishTransientEvent(null);
       if (entryState.joinInFlight && !entryState.established) {
         entryState.joinInFlight = false;
         entryState.ambiguousJoin = true;
@@ -536,7 +648,8 @@ export function useRoomSocket(
       if (
         !parsed.success ||
         parsed.data.type === "room.join" ||
-        parsed.data.type === "room.resume"
+        parsed.data.type === "room.resume" ||
+        parsed.data.type === "game.transient"
       ) {
         setError(socketError("VALIDATION_FAILED", "房间命令格式无效"));
         return null;
@@ -544,6 +657,20 @@ export function useRoomSocket(
       if (!sendParsed(parsed.data, true)) return null;
       setError(null);
       return requestId;
+    };
+    sendTransientEventRef.current = (matchId, event) => {
+      if (intentionalClose || !isTransportOpen()) return null;
+      const requestId = createRequestId();
+      const parsed = clientCommandSchema.safeParse({
+        matchId,
+        payload: event,
+        protocol: 1,
+        requestId,
+        roomId,
+        type: "game.transient",
+      });
+      if (!parsed.success || parsed.data.type !== "game.transient") return null;
+      return sendTransient(parsed.data) ? requestId : null;
     };
     retryRef.current = () => {
       intentionalClose = false;
@@ -575,6 +702,7 @@ export function useRoomSocket(
     return () => {
       disposed = true;
       intentionalClose = true;
+      clearQueuedTransient();
       if (entryState.joinInFlight && !entryState.established) {
         entryState.joinInFlight = false;
         entryState.ambiguousJoin = true;
@@ -588,12 +716,18 @@ export function useRoomSocket(
       polling?.close();
       if (socketRef.current === socket) socketRef.current = null;
       sendCommandRef.current = () => null;
+      sendTransientEventRef.current = () => null;
       retryRef.current = () => undefined;
     };
   }, [initialJoinTicket, roomId]);
 
   const sendCommand = useCallback(
     (command: RoomCommandInput) => sendCommandRef.current(command),
+    [],
+  );
+  const sendTransientEvent = useCallback(
+    (matchId: MatchId, event: GameTransientCommand["payload"]) =>
+      sendTransientEventRef.current(matchId, event),
     [],
   );
   const retry = useCallback(() => retryRef.current(), []);
@@ -606,6 +740,8 @@ export function useRoomSocket(
     pendingCommandTypes: [...pendingCommands.values()],
     retry,
     sendCommand,
+    sendTransientEvent,
     snapshot,
+    transientEvent,
   };
 }

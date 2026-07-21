@@ -82,7 +82,29 @@ export class LongPollingTransport {
       }
     }
 
-    if (this.#messages.length >= MAX_QUEUED_MESSAGES) return false;
+    if (message.type === "game.transient") {
+      const replaceIndex = this.#messages.findLastIndex(
+        (candidate) =>
+          candidate.type === "game.transient" &&
+          candidate.roomId === message.roomId &&
+          candidate.matchId === message.matchId &&
+          candidate.payload.senderSeatId === message.payload.senderSeatId,
+      );
+      if (replaceIndex >= 0) {
+        this.#messages.splice(replaceIndex, 1);
+      }
+      if (this.#messages.length >= MAX_QUEUED_MESSAGES) return true;
+      this.#messages.push(message);
+      return true;
+    }
+
+    if (this.#messages.length >= MAX_QUEUED_MESSAGES) {
+      const transientIndex = this.#messages.findIndex(
+        (candidate) => candidate.type === "game.transient",
+      );
+      if (transientIndex < 0) return false;
+      this.#messages.splice(transientIndex, 1);
+    }
     this.#messages.push(message);
     return true;
   }

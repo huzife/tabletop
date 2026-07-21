@@ -9,6 +9,7 @@ import {
 import { seatIdSchema } from "@tabletop/protocol";
 import { describe, expect, it } from "vitest";
 
+import { simulateBilliardsShot } from "../physics/index.js";
 import {
   createBilliardsMatch,
   handleBilliardsAction,
@@ -27,6 +28,11 @@ import {
 } from "../server/setup.js";
 import type { BilliardsMatchState, BilliardsSimulationResult } from "../server/state.js";
 import type { BilliardsShot } from "../shared/actions.js";
+import {
+  billiardsSettings,
+  type BilliardsMode,
+  type BilliardsSettings,
+} from "../shared/settings.js";
 import { tableSpecFor } from "../shared/table.js";
 import { billiardsDisplayEventSchema, billiardsViewSchema } from "../shared/view.js";
 
@@ -44,12 +50,16 @@ function adjudicateSnookerShot(
   });
 }
 
-function state(mode: "chinese-eight-ball" | "snooker"): BilliardsMatchState {
-  return createInitialBilliardsState({ mode }, seats);
+function settings(mode: BilliardsMode): BilliardsSettings {
+  return { ...billiardsSettings.defaultValue, mode };
 }
 
-function practiceState(mode: "chinese-eight-ball" | "snooker"): BilliardsMatchState {
-  return createInitialBilliardsState({ mode }, [seat1]);
+function state(mode: BilliardsMode): BilliardsMatchState {
+  return createInitialBilliardsState(settings(mode), seats);
+}
+
+function practiceState(mode: BilliardsMode): BilliardsMatchState {
+  return createInitialBilliardsState(settings(mode), [seat1]);
 }
 
 function shot(nominatedColor: BilliardsShot["nominatedColor"] = null): BilliardsShot {
@@ -135,6 +145,25 @@ function withSnookerScores(
 }
 
 describe("standard billiards setups", () => {
+  it("defaults, validates, and summarizes the room's table friction", () => {
+    const historical = billiardsSettings.schema.parse({ mode: "snooker" });
+
+    expect(historical.tableFriction).toBe(0.2);
+    expect(
+      billiardsSettings.schema.safeParse({ mode: "snooker", tableFriction: 0.11 }).success,
+    ).toBe(false);
+    expect(
+      billiardsSettings.schema.safeParse({ mode: "snooker", tableFriction: 0.29 }).success,
+    ).toBe(false);
+    expect(
+      billiardsSettings.schema.safeParse({ mode: "snooker", tableFriction: 0.205 }).success,
+    ).toBe(false);
+    expect(billiardsSettings.summarize({ ...historical, tableFriction: 0.26 })).toEqual([
+      { label: "模式", value: "斯诺克" },
+      { label: "台面/边库摩擦", value: "0.26（慢台）" },
+    ]);
+  });
+
   it("builds a legal deterministic Chinese eight-ball rack", () => {
     const balls = createChineseEightBallRack();
     const table = tableSpecFor("chinese-eight-ball");
@@ -997,7 +1026,7 @@ describe("snooker rules", () => {
 describe("single-player practice", () => {
   it("accepts one human plus one empty lobby seat and creates a one-seat practice state", () => {
     const definitions = billiardsServerModule.lobby?.getSeatDefinitions({
-      mode: "chinese-eight-ball",
+      ...settings("chinese-eight-ball"),
     });
     const validateStart = billiardsServerModule.lobby?.validateStart;
     if (!definitions || !validateStart) throw new Error("missing billiards lobby contract");
@@ -1011,7 +1040,7 @@ describe("single-player practice", () => {
             seatId,
           })),
         },
-        { mode: "chinese-eight-ball" },
+        settings("chinese-eight-ball"),
       ),
     ).toEqual({ ok: true });
     expect(
@@ -1023,7 +1052,7 @@ describe("single-player practice", () => {
             seatId,
           })),
         },
-        { mode: "chinese-eight-ball" },
+        settings("chinese-eight-ball"),
       ),
     ).toEqual({ ok: true });
     expect(
@@ -1035,7 +1064,7 @@ describe("single-player practice", () => {
             seatId,
           })),
         },
-        { mode: "chinese-eight-ball" },
+        settings("chinese-eight-ball"),
       ),
     ).toMatchObject({ ok: false });
 
@@ -1043,7 +1072,7 @@ describe("single-player practice", () => {
       createTestCreateMatchContextV1({
         seats: [{ controller: { kind: "human" }, seatId: seat1 }],
       }),
-      { mode: "chinese-eight-ball" },
+      settings("chinese-eight-ball"),
     );
     expect(practice).toMatchObject({
       activeSeatId: seat1,
@@ -1055,9 +1084,10 @@ describe("single-player practice", () => {
       snookerOn: null,
     });
 
-    const versus = createBilliardsMatch(createTestCreateMatchContextV1(), {
-      mode: "chinese-eight-ball",
-    });
+    const versus = createBilliardsMatch(
+      createTestCreateMatchContextV1(),
+      settings("chinese-eight-ball"),
+    );
     expect(versus).toMatchObject({ practice: false, seatIds: [seat1, seat2] });
   });
 
@@ -1273,7 +1303,12 @@ describe("authoritative action permissions", () => {
   });
 
   it("emits a schema-valid shot event containing initial balls but no trajectory", () => {
-    const initial = readyToShoot(state("chinese-eight-ball"));
+    const initial = readyToShoot(
+      createInitialBilliardsState(
+        { ...settings("chinese-eight-ball"), tableFriction: 0.26 },
+        seats,
+      ),
+    );
     const transition = handleBilliardsAction(
       createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
       initial,
@@ -1281,10 +1316,25 @@ describe("authoritative action permissions", () => {
     );
     if (transition.kind !== "applied") throw new Error("expected applied shot");
     const event = transition.events.find(({ type }) => type === "billiards.shot");
-    expect(event?.type).toBe("billiards.shot");
+    if (!event || event.type !== "billiards.shot") throw new Error("expected billiards shot event");
     expect(() => billiardsDisplayEventSchema.parse(event)).not.toThrow();
     expect(event).toHaveProperty("initialBalls");
+    expect(event.tableFriction).toBe(0.26);
     expect(event).not.toHaveProperty("frames");
+
+    const replay = simulateBilliardsShot({
+      balls: event.initialBalls,
+      mode: event.mode,
+      shot: event.shot,
+      tableFriction: event.tableFriction,
+    });
+    expect(replay.checksum).toBe(event.simulationChecksum);
+
+    const projected = projectBilliardsView(createTestProjectionContextV1(), initial, {
+      kind: "player",
+      seatId: seat1,
+    });
+    expect(projected.tableFriction).toBe(0.26);
   });
 
   it("ends immediately on resignation, departure, or expired disconnect grace", () => {

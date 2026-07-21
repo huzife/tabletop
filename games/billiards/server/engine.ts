@@ -104,6 +104,7 @@ function transitionForShot(
     balls: initialBalls,
     mode: state.settings.mode,
     shot: action.shot,
+    tableFriction: state.settings.tableFriction,
   }) as BilliardsSimulationResult;
   const resolution = state.practice
     ? adjudicatePracticeShot({ actorSeatId, shot: action.shot, simulation, state })
@@ -129,6 +130,7 @@ function transitionForShot(
     shot: action.shot,
     shotNumber: resolution.state.shotNumber,
     simulationChecksum: simulation.checksum,
+    tableFriction: state.settings.tableFriction,
     type: "billiards.shot",
   };
   const events: BilliardsDisplayEvent[] = [shotEvent];
@@ -342,6 +344,7 @@ export function projectBilliardsView(
     practice: state.practice,
     shotNumber: state.shotNumber,
     snookerOn: state.snookerOn,
+    tableFriction: state.settings.tableFriction,
     table: {
       ballDiameter: table.ballDiameter,
       baulkLineX: table.baulkLineX,

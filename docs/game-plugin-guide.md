@@ -118,6 +118,8 @@ interface GameSettingsContractV1<TSettings> {
 
 设置只能在未开局或一局结束后修改。修改成功由平台清除所有真人准备状态，插件无需重复实现。
 
+共享合同还可以声明 `transientEventSchema`，用于瞄准、光标等允许丢包的临时展示数据。宿主会在服务端转发前和浏览器接收后各校验一次该 schema；未声明时拒绝发送。临时事件不进入 `handleAction`，不改变状态或修订号，也不能承载任何规则判定依据。
+
 ## 5. 服务端插件合同
 
 服务端插件把任意合法动作转换成新的不可变状态。权威接口位于 `packages/game-sdk/src/server/module.ts`；下面省略泛型约束，仅展示当前结构。接口刻意不暴露 WebSocket、长轮询、数据库或房间可变对象。
@@ -339,7 +341,7 @@ interface GameWebModuleV1<TSettings, TAction, TView, TDisplayEvent> {
 }
 ```
 
-`GameView` 接收最新完整投影视图、尚未播放的展示事件、发送动作函数和只读连接状态。它不能访问原始 WebSocket 或长轮询，也不能修改公共房间 store。这样平台可以统一处理请求 ID、修订号、错误提示和重连。
+`GameView` 接收最新完整投影视图、尚未播放的展示事件、发送动作函数和只读连接状态。声明临时事件 schema 的插件还可使用 `dispatchTransientEvent` 和最近收到的 `transientEvent`；后者包含服务端生成的 `senderSeatId`。插件应按当前投影中的行动座位、阶段和本地序号过滤延迟事件，并始终允许事件缺失。它不能访问原始 WebSocket 或长轮询，也不能修改公共房间 store。这样平台可以统一处理请求 ID、修订号、错误提示、限频降级和重连。
 
 插件可以用 DOM、CSS、Canvas 或 SVG 实现游戏操作面。首期二维界面优先使用 DOM/CSS 或 Canvas，不引入 3D。固定格式区域必须有稳定尺寸约束，动画元素不得撑开布局。
 

@@ -58,7 +58,7 @@ describe("web routes", () => {
     expect(screen.getByText("单人练习")).toBeInTheDocument();
   });
 
-  it("creates solo practice without showing or submitting an AI profile", async () => {
+  it("creates solo practice with its selected billiards settings and no AI profile", async () => {
     let createRoomBody: Record<string, unknown> | undefined;
     vi.stubGlobal(
       "fetch",
@@ -77,13 +77,18 @@ describe("web routes", () => {
 
     expect(screen.getByLabelText("房间密码（可选）")).toBeDisabled();
     expect(screen.queryByText("AI 难度")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("台面与边库摩擦系数"), {
+      target: { value: "0.26" },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /斯诺克/ }));
+    expect(screen.getByText("0.26（慢台）")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
 
     await waitFor(() => expect(createRoomBody).toBeDefined());
     expect(createRoomBody).toMatchObject({
       gameId: "billiards",
       practice: true,
-      settings: { mode: "chinese-eight-ball" },
+      settings: { mode: "snooker", tableFriction: 0.26 },
     });
     expect(createRoomBody).not.toHaveProperty("botProfileId");
   });

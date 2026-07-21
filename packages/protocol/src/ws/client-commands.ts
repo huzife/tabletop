@@ -34,6 +34,12 @@ const gameActionPayloadSchema = z
   })
   .catchall(jsonValueSchema);
 
+export const gameTransientPayloadSchema = z
+  .object({
+    type: z.string().min(1).max(96),
+  })
+  .catchall(jsonValueSchema);
+
 export const roomJoinCommandSchema = z.strictObject({
   ...clientEnvelopeFields,
   type: z.literal("room.join"),
@@ -160,6 +166,13 @@ export const gameActionCommandSchema = z.strictObject({
   payload: gameActionPayloadSchema,
 });
 
+export const gameTransientCommandSchema = z.strictObject({
+  ...roomCommandFields,
+  matchId: matchIdSchema,
+  type: z.literal("game.transient"),
+  payload: gameTransientPayloadSchema,
+});
+
 export const clientCommandSchema = z.discriminatedUnion("type", [
   roomJoinCommandSchema,
   roomResumeCommandSchema,
@@ -177,10 +190,12 @@ export const clientCommandSchema = z.discriminatedUnion("type", [
   roomMatchStartCommandSchema,
   chatSendCommandSchema,
   gameActionCommandSchema,
+  gameTransientCommandSchema,
 ]);
 
 export type ChatSendCommand = z.infer<typeof chatSendCommandSchema>;
 export type ClientCommand = z.infer<typeof clientCommandSchema>;
 export type GameActionCommand = z.infer<typeof gameActionCommandSchema>;
+export type GameTransientCommand = z.infer<typeof gameTransientCommandSchema>;
 export type RoomJoinCommand = z.infer<typeof roomJoinCommandSchema>;
 export type RoomResumeCommand = z.infer<typeof roomResumeCommandSchema>;

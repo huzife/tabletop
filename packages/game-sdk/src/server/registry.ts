@@ -1,6 +1,6 @@
 import type { GameId, JsonValue, SeatId } from "@tabletop/protocol";
 
-import type { GameActionV1, GameDisplayEventV1 } from "../shared/contract.js";
+import type { GameActionV1, GameDisplayEventV1, GameTransientEventV1 } from "../shared/contract.js";
 import type {
   GameLobbySeatV1,
   GameSeatDefinitionV1,
@@ -68,6 +68,7 @@ export interface HostedGameServerModuleV1 {
   getSeatDefinitions(settings: JsonValue): readonly GameSeatDefinitionV1[];
   validateStart(settings: JsonValue, seats: readonly GameLobbySeatV1[]): GameStartValidationV1;
   getActiveSeatIds(state: Readonly<object>): readonly SeatId[];
+  parseTransientEvent(input: unknown): GameTransientEventV1 | null;
   listBotProfiles(): readonly BotProfileV1[];
   createBotInput(
     context: AutomationInputContextV1,
@@ -160,6 +161,9 @@ export function createHostedGameServerModuleV1(
     },
     getActiveSeatIds(state) {
       return module.getActiveSeatIds?.(state) ?? [];
+    },
+    parseTransientEvent(input) {
+      return module.shared.transientEventSchema?.parse(input) ?? null;
     },
     listBotProfiles() {
       return module.bot?.listProfiles() ?? [];

@@ -2,6 +2,8 @@ import type { ClientCommand, ConnectionId, ServerMessage } from "@tabletop/proto
 
 import { ApiClientError, roomConnectionApi } from "../api/client";
 
+const TRANSIENT_COMMAND_TIMEOUT_MS = 2_000;
+
 export interface LongPollingTransportClose {
   readonly code: number;
   readonly reason: string;
@@ -18,6 +20,9 @@ export class RoomLongPollingTransport {
   #closed = false;
   #commandQueue: Promise<void> = Promise.resolve();
   #connectionId: ConnectionId | undefined;
+  #queuedTransient: ClientCommand | undefined;
+  #transientAbortController: AbortController | undefined;
+  #transientTimeout: number | undefined;
 
   constructor(callbacks: LongPollingTransportCallbacks) {
     this.#callbacks = callbacks;
@@ -30,6 +35,8 @@ export class RoomLongPollingTransport {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#queuedTransient = undefined;
+    this.#cancelTransientRequest();
     this.#abortController.abort();
     const connectionId = this.#connectionId;
     if (connectionId !== undefined) {
@@ -55,19 +62,69 @@ export class RoomLongPollingTransport {
   send(command: ClientCommand): boolean {
     const connectionId = this.#connectionId;
     if (this.#closed || connectionId === undefined) return false;
+    if (command.type === "game.transient") {
+      this.#queuedTransient = command;
+      this.#flushTransient();
+      return true;
+    }
+    this.#queuedTransient = undefined;
+    this.#cancelTransientRequest();
     this.#commandQueue = this.#commandQueue
       .then(async () => {
-        await roomConnectionApi.command(connectionId, command);
+        if (this.#closed) return;
+        await roomConnectionApi.command(connectionId, command, this.#abortController.signal);
       })
-      .catch((error: unknown) => {
-        this.#fail(error);
-      });
+      .catch((error: unknown) => this.#fail(error));
     return true;
+  }
+
+  #cancelTransientRequest(): void {
+    if (this.#transientTimeout !== undefined) {
+      window.clearTimeout(this.#transientTimeout);
+      this.#transientTimeout = undefined;
+    }
+    this.#transientAbortController?.abort();
+    this.#transientAbortController = undefined;
+  }
+
+  #flushTransient(): void {
+    if (
+      this.#closed ||
+      this.#connectionId === undefined ||
+      this.#transientAbortController !== undefined
+    ) {
+      return;
+    }
+    const command = this.#queuedTransient;
+    if (command === undefined) return;
+    this.#queuedTransient = undefined;
+
+    const connectionId = this.#connectionId;
+    const controller = new AbortController();
+    this.#transientAbortController = controller;
+    this.#transientTimeout = window.setTimeout(
+      () => controller.abort(),
+      TRANSIENT_COMMAND_TIMEOUT_MS,
+    );
+    void roomConnectionApi
+      .command(connectionId, command, controller.signal)
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.#transientAbortController !== controller) return;
+        if (this.#transientTimeout !== undefined) {
+          window.clearTimeout(this.#transientTimeout);
+          this.#transientTimeout = undefined;
+        }
+        this.#transientAbortController = undefined;
+        this.#flushTransient();
+      });
   }
 
   #fail(error: unknown): void {
     if (this.#closed || isAbortError(error)) return;
     this.#closed = true;
+    this.#queuedTransient = undefined;
+    this.#cancelTransientRequest();
     this.#abortController.abort();
     this.#callbacks.onClose(closeFromError(error));
   }
@@ -86,6 +143,9 @@ export class RoomLongPollingTransport {
         }
         if (response.close !== undefined) {
           this.#closed = true;
+          this.#queuedTransient = undefined;
+          this.#cancelTransientRequest();
+          this.#abortController.abort();
           this.#callbacks.onClose(response.close);
           return;
         }

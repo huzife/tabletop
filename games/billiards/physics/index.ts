@@ -10,7 +10,12 @@ import {
 } from "p2-es";
 
 import type { BilliardsShot } from "../shared/actions.js";
-import type { BilliardsMode } from "../shared/settings.js";
+import {
+  BILLIARDS_TABLE_FRICTION_DEFAULT,
+  BILLIARDS_TABLE_FRICTION_MAX,
+  BILLIARDS_TABLE_FRICTION_MIN,
+  type BilliardsMode,
+} from "../shared/settings.js";
 import { tableSpecFor, type BilliardsTableSpec } from "../shared/table.js";
 import type { BilliardsBall } from "../shared/view.js";
 
@@ -19,9 +24,12 @@ const FRAME_STEP_INTERVAL = 4;
 const MAX_STEPS = 4_800;
 const MIN_REST_STEPS = 12;
 const GRAVITY = 9.81;
-const SLIDING_FRICTION = 0.2;
-const ROLLING_DECELERATION = 0.16;
-const SIDE_SPIN_DAMPING = 0.72;
+const BASE_ROLLING_DECELERATION = 0.16;
+const BASE_SIDE_SPIN_DAMPING = 0.72;
+const BASE_CUSHION_FRICTION = 0.12;
+const BASE_CUSHION_TANGENTIAL_RESPONSE = 0.075;
+const BASE_CUSHION_ROLL_DISTURBANCE = 0.28;
+const CUSHION_RESTITUTION_FRICTION_RESPONSE = 0.08;
 const STOP_SPEED = 0.012;
 const STOP_SURFACE_SPIN_SPEED = 0.012;
 const POCKET_CAPTURE_HEIGHT_FACTOR = 0.35;
@@ -67,6 +75,21 @@ export interface SimulateBilliardsShotInput {
   readonly captureFrames?: boolean;
   readonly mode: BilliardsMode;
   readonly shot: BilliardsShot;
+  /**
+   * The room's cloth-and-cushion friction coefficient. Omitted calls retain
+   * the standard 0.20 table so historical replays remain deterministic.
+   */
+  readonly tableFriction?: number;
+}
+
+export interface BilliardsSurfaceParameters {
+  readonly cushionFriction: number;
+  readonly cushionRestitution: number;
+  readonly cushionRollDisturbance: number;
+  readonly cushionTangentialResponse: number;
+  readonly rollingDeceleration: number;
+  readonly sideSpinDamping: number;
+  readonly slidingFriction: number;
 }
 
 interface ActiveBallState {
@@ -100,6 +123,37 @@ interface ShotContext {
   readonly elevationFactor: number;
   readonly radius: number;
   readonly sideCurveFactor: number;
+}
+
+/**
+ * Converts the single room setting into the coefficients used by the 2.5D
+ * simulator. At the standard 0.20 setting every value is the legacy value.
+ * Increasing friction shortens rolling travel, accelerates slip-to-roll transfer,
+ * damps english sooner, increases cushion grip, and makes rebounds modestly deader.
+ */
+export function billiardsSurfaceParameters(
+  table: Readonly<BilliardsTableSpec>,
+  tableFriction = BILLIARDS_TABLE_FRICTION_DEFAULT,
+): BilliardsSurfaceParameters {
+  const slidingFriction = clamp(
+    finiteOr(tableFriction, BILLIARDS_TABLE_FRICTION_DEFAULT),
+    BILLIARDS_TABLE_FRICTION_MIN,
+    BILLIARDS_TABLE_FRICTION_MAX,
+  );
+  const scale = slidingFriction / BILLIARDS_TABLE_FRICTION_DEFAULT;
+  return {
+    cushionFriction: BASE_CUSHION_FRICTION * scale,
+    cushionRestitution: clamp(
+      table.cushionRestitution + (1 - scale) * CUSHION_RESTITUTION_FRICTION_RESPONSE,
+      0.7,
+      0.9,
+    ),
+    cushionRollDisturbance: BASE_CUSHION_ROLL_DISTURBANCE * scale,
+    cushionTangentialResponse: BASE_CUSHION_TANGENTIAL_RESPONSE * scale,
+    rollingDeceleration: BASE_ROLLING_DECELERATION * scale,
+    sideSpinDamping: BASE_SIDE_SPIN_DAMPING * scale,
+    slidingFriction,
+  };
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
@@ -180,7 +234,10 @@ function addRail(
   railsByBody.set(body, { normalX, normalY });
 }
 
-function createWorld(table: BilliardsTableSpec): {
+function createWorld(
+  table: BilliardsTableSpec,
+  surface: Readonly<BilliardsSurfaceParameters>,
+): {
   readonly ballMaterial: Material;
   readonly railsByBody: Map<Body, Rail>;
   readonly world: World;
@@ -208,9 +265,9 @@ function createWorld(table: BilliardsTableSpec): {
   );
   world.addContactMaterial(
     new ContactMaterial(ballMaterial, railMaterial, {
-      friction: 0.12,
+      friction: surface.cushionFriction,
       relaxation: 3,
-      restitution: table.cushionRestitution,
+      restitution: surface.cushionRestitution,
       stiffness: 1e8,
     }),
   );
@@ -327,7 +384,11 @@ function applyCueImpulse(
   };
 }
 
-function applyClothAndSpin(state: ActiveBallState, context: ShotContext): void {
+function applyClothAndSpin(
+  state: ActiveBallState,
+  context: ShotContext,
+  surface: Readonly<BilliardsSurfaceParameters>,
+): void {
   const body = state.body;
   const radius = context.radius;
   let vx = velocityX(body);
@@ -339,7 +400,7 @@ function applyClothAndSpin(state: ActiveBallState, context: ShotContext): void {
   const slipSpeed = Math.hypot(slipX, slipY);
 
   if (slipSpeed > 0.002 && airborneFactor > 0.1) {
-    const maximumVelocityChange = SLIDING_FRICTION * GRAVITY * FIXED_STEP_SECONDS;
+    const maximumVelocityChange = surface.slidingFriction * GRAVITY * FIXED_STEP_SECONDS;
     const velocityChange = Math.min(maximumVelocityChange, slipSpeed / 3.5);
     const deltaVx = (-slipX / slipSpeed) * velocityChange;
     const deltaVy = (-slipY / slipSpeed) * velocityChange;
@@ -350,7 +411,7 @@ function applyClothAndSpin(state: ActiveBallState, context: ShotContext): void {
   } else if (airborneFactor > 0.1) {
     const speed = Math.hypot(vx, vy);
     if (speed > 0) {
-      const nextSpeed = Math.max(0, speed - ROLLING_DECELERATION * FIXED_STEP_SECONDS);
+      const nextSpeed = Math.max(0, speed - surface.rollingDeceleration * FIXED_STEP_SECONDS);
       const scale = nextSpeed / speed;
       vx *= scale;
       vy *= scale;
@@ -375,7 +436,7 @@ function applyClothAndSpin(state: ActiveBallState, context: ShotContext): void {
   }
 
   setBodyVelocity(body, vx, vy);
-  body.angularVelocity = spinZ * Math.exp(-SIDE_SPIN_DAMPING * FIXED_STEP_SECONDS);
+  body.angularVelocity = spinZ * Math.exp(-surface.sideSpinDamping * FIXED_STEP_SECONDS);
 
   const rollingAxisRate =
     speed > 0 ? (-state.spinX * vy + state.spinY * vx) / Math.max(speed, Number.EPSILON) : 0;
@@ -413,7 +474,11 @@ function updateProjectedCollisionMask(state: ActiveBallState, table: BilliardsTa
     RAIL_COLLISION_GROUP | (state.z < table.ballDiameter ? BALL_COLLISION_GROUP : 0);
 }
 
-function applyRailSpin(effect: RailEffect, radius: number): void {
+function applyRailSpin(
+  effect: RailEffect,
+  radius: number,
+  surface: Readonly<BilliardsSurfaceParameters>,
+): void {
   const { body } = effect.ball;
   if (effect.ball.pocketed) {
     return;
@@ -426,7 +491,11 @@ function applyRailSpin(effect: RailEffect, radius: number): void {
   const tangentialSpeed = vx * tangentX + vy * tangentY;
   const spinZ = finiteOr(body.angularVelocity, 0);
   const relativeSurfaceSpeed = tangentialSpeed - spinZ * radius;
-  const tangentialChange = clamp(-relativeSurfaceSpeed * 0.075, -0.42, 0.42);
+  const tangentialChange = clamp(
+    -relativeSurfaceSpeed * surface.cushionTangentialResponse,
+    -0.42,
+    0.42,
+  );
 
   setBodyVelocity(body, vx + tangentX * tangentialChange, vy + tangentY * tangentialChange);
   body.angularVelocity = spinZ - (2.5 * tangentialChange) / radius;
@@ -435,8 +504,8 @@ function applyRailSpin(effect: RailEffect, radius: number): void {
   // expected running/check side response without making successive rails gain energy.
   const inwardRoll =
     effect.ball.spinX * effect.rail.normalX + effect.ball.spinY * effect.rail.normalY;
-  effect.ball.spinX -= effect.rail.normalX * inwardRoll * 0.28;
-  effect.ball.spinY -= effect.rail.normalY * inwardRoll * 0.28;
+  effect.ball.spinX -= effect.rail.normalX * inwardRoll * surface.cushionRollDisturbance;
+  effect.ball.spinY -= effect.rail.normalY * inwardRoll * surface.cushionRollDisturbance;
 }
 
 function findPocket(
@@ -686,8 +755,9 @@ function checksumFor(result: Omit<ShotSimulationResult, "checksum" | "frames">):
  */
 export function simulateBilliardsShot(input: SimulateBilliardsShotInput): ShotSimulationResult {
   const table = tableSpecFor(input.mode);
+  const surface = billiardsSurfaceParameters(table, input.tableFriction);
   const radius = table.ballDiameter / 2;
-  const { ballMaterial, railsByBody, world } = createWorld(table);
+  const { ballMaterial, railsByBody, world } = createWorld(table, surface);
   const { active, byBody, byId } = createActiveBalls(input.balls, table, world, ballMaterial);
   const cue = active.find((state) => state.initial.kind === "cue");
   const context = applyCueImpulse(cue, input.shot, radius);
@@ -800,7 +870,7 @@ export function simulateBilliardsShot(input: SimulateBilliardsShotInput): ShotSi
   for (let step = 1; step <= MAX_STEPS; step += 1) {
     for (const state of active) {
       if (!state.pocketed) {
-        applyClothAndSpin(state, context);
+        applyClothAndSpin(state, context, surface);
         integrateVerticalMotion(state, table.ballDiameter * 1.5);
         updateProjectedCollisionMask(state, table);
       }
@@ -810,7 +880,7 @@ export function simulateBilliardsShot(input: SimulateBilliardsShotInput): ShotSi
     world.step(FIXED_STEP_SECONDS);
     recordJumpedBalls(cue, active, table, cueContactBallIds, jumpCrossings, jumpedBallIds);
     for (const effect of pendingRailEffects) {
-      applyRailSpin(effect, radius);
+      applyRailSpin(effect, radius, surface);
     }
     for (const state of active) {
       sanitizeState(state, table);

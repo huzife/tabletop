@@ -134,6 +134,16 @@ describe("server message schemas", () => {
       },
       {
         ...base,
+        type: "game.transient",
+        roomId: "room-test",
+        matchId: "match-test",
+        payload: {
+          senderSeatId: "seat-1",
+          event: { type: "aim.preview", power: 42 },
+        },
+      },
+      {
+        ...base,
         type: "service.status.changed",
         payload: { scope: "game", gameId: "test-alpha", enabled: false },
       },

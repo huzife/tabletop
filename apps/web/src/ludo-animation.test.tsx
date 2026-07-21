@@ -19,7 +19,7 @@ const movementEvents: readonly LudoDisplayStep[] = [
   },
 ];
 
-describe("Ludo movement animation lifecycle", () => {
+describe("Ludo web timing and movement lifecycle", () => {
   let requestAnimationFrameMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -155,9 +155,53 @@ describe("Ludo movement animation lifecycle", () => {
 
     expect(rendered.container.querySelector(".tt-ludo-animated-plane")).toBeNull();
     expect(requestAnimationFrameMock).toHaveBeenCalledTimes(2);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
 
     rendered.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("refreshes the visible deadline and progress bar until they reach zero", () => {
+    const rendered = render(
+      <LudoGameView
+        actionPending={false}
+        connectionState="connected"
+        dispatchAction={vi.fn()}
+        displayEvents={emptyEvents}
+        readOnly={false}
+        view={createView("main-0", 0, 30_000)}
+      />,
+    );
+    const clock = requireElement<HTMLElement>(rendered.container, ".tt-ludo-connection span");
+    const progress = requireElement<HTMLElement>(rendered.container, ".tt-ludo-deadline span");
+
+    expect(clock).toHaveTextContent("30 秒");
+    expect(progress.style.width).toBe("100%");
+
+    act(() => vi.advanceTimersByTime(1_250));
+
+    expect(clock).toHaveTextContent("29 秒");
+    expect(Number.parseFloat(progress.style.width)).toBeCloseTo(95.83, 1);
+
+    rendered.rerender(
+      <LudoGameView
+        actionPending={false}
+        connectionState="connected"
+        dispatchAction={vi.fn()}
+        displayEvents={emptyEvents}
+        readOnly={false}
+        view={createView("main-0", 0, 30_000)}
+      />,
+    );
+
+    expect(clock).toHaveTextContent("30 秒");
+    expect(progress.style.width).toBe("100%");
+    expect(vi.getTimerCount()).toBe(1);
+
+    act(() => vi.advanceTimersByTime(30_000));
+
+    expect(clock).toHaveTextContent("0 秒");
+    expect(progress.style.width).toBe("0%");
     expect(vi.getTimerCount()).toBe(0);
   });
 });

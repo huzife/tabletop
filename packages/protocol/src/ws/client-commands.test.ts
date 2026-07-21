@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { clientCommandSchema, gameActionCommandSchema } from "./client-commands.js";
+import {
+  clientCommandSchema,
+  gameActionCommandSchema,
+  gameTransientCommandSchema,
+} from "./client-commands.js";
 
 const requestId = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const common = { protocol: 1, requestId } as const;
@@ -51,11 +55,35 @@ describe("client command schemas", () => {
         type: "game.action",
         payload: { type: "turn.choose", deeply: { custom: [1, true] } },
       },
+      {
+        ...room,
+        matchId: "match-test",
+        type: "game.transient",
+        payload: { type: "cursor.preview", x: 4, y: 7 },
+      },
     ];
 
     for (const command of commands) {
       expect(clientCommandSchema.safeParse(command).success, command.type).toBe(true);
     }
+  });
+
+  it("routes transient game data without an authoritative revision", () => {
+    expect(
+      gameTransientCommandSchema.safeParse({
+        ...room,
+        matchId: "match-test",
+        type: "game.transient",
+        payload: { type: "aim.preview", power: 42 },
+      }).success,
+    ).toBe(true);
+    expect(
+      gameTransientCommandSchema.safeParse({
+        ...room,
+        type: "game.transient",
+        payload: { type: "aim.preview" },
+      }).success,
+    ).toBe(false);
   });
 
   it("requires routing fields for authoritative actions", () => {

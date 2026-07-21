@@ -206,6 +206,39 @@
   min-width: 0;
 }
 
+.billiards-opponent-aim {
+  align-items: center;
+  border-left: 3px solid #b57a18;
+  color: #4d4330;
+  display: flex;
+  font-size: 11px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 3px 0 3px 8px;
+}
+
+.billiards-opponent-aim span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.billiards-opponent-aim output {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.billiards-controls:has(.billiards-opponent-aim) .billiards-range input[type="range"]:disabled {
+  opacity: 0.82;
+}
+
+.billiards-controls:has(.billiards-opponent-aim) .billiards-tip-selector:disabled {
+  cursor: default;
+  filter: none;
+  opacity: 0.9;
+}
+
 .billiards-range {
   display: grid;
   gap: 7px;
@@ -527,13 +560,21 @@
 }
 
 .billiards-settings {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+
+.billiards-settings__group {
   border: 0;
   margin: 0;
   min-width: 0;
   padding: 0;
 }
 
-.billiards-settings > legend {
+.billiards-settings__group > legend {
   color: #202522;
   font-size: 13px;
   font-weight: 700;
@@ -580,7 +621,53 @@
   line-height: 1.35;
 }
 
-.billiards-settings:disabled .billiards-settings__mode {
+.billiards-settings__friction {
+  display: grid;
+  gap: 7px;
+}
+
+.billiards-settings__friction-header {
+  align-items: baseline;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.billiards-settings__friction-header strong {
+  color: #202522;
+  font-size: 13px;
+}
+
+.billiards-settings__friction-header output {
+  color: #1d684f;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.billiards-settings__friction input[type="range"] {
+  accent-color: #23815f;
+  margin: 0;
+  width: 100%;
+}
+
+.billiards-settings__friction-scale {
+  color: #68716c;
+  display: grid;
+  font-size: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.billiards-settings__friction-scale span:nth-child(2) {
+  text-align: center;
+}
+
+.billiards-settings__friction-scale span:last-child {
+  text-align: right;
+}
+
+.billiards-settings__group:disabled .billiards-settings__mode,
+.billiards-settings__group:disabled .billiards-settings__friction {
   cursor: not-allowed;
   opacity: 0.54;
 }
@@ -652,6 +739,29 @@
   .billiards-tip-control {
     grid-column: 2;
     grid-row: 1 / span 2;
+  }
+
+  .billiards-controls:has(.billiards-opponent-aim) {
+    grid-template-areas:
+      "opponent opponent"
+      "power tip"
+      "elevation tip";
+  }
+
+  .billiards-controls:has(.billiards-opponent-aim) .billiards-opponent-aim {
+    grid-area: opponent;
+  }
+
+  .billiards-controls:has(.billiards-opponent-aim) .billiards-range:has(#billiards-power) {
+    grid-area: power;
+  }
+
+  .billiards-controls:has(.billiards-opponent-aim) .billiards-range:has(#billiards-elevation) {
+    grid-area: elevation;
+  }
+
+  .billiards-controls:has(.billiards-opponent-aim) .billiards-tip-control {
+    grid-area: tip;
   }
 
   .billiards-tip-control .billiards-control-heading {

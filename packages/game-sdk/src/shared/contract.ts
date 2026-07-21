@@ -6,6 +6,7 @@ import { defineGameSettingsContractV1, type GameSettingsContractV1 } from "./set
 
 export type GameActionV1 = JsonObject & { readonly type: string };
 export type GameDisplayEventV1 = JsonObject & { readonly type: string };
+export type GameTransientEventV1 = JsonObject & { readonly type: string };
 
 export interface GameSharedContractV1<
   TSettings extends JsonValue,
@@ -18,6 +19,7 @@ export interface GameSharedContractV1<
   readonly actionSchema: z.ZodType<TAction>;
   readonly viewSchema: z.ZodType<TView>;
   readonly displayEventSchema: z.ZodType<TDisplayEvent>;
+  readonly transientEventSchema?: z.ZodType<GameTransientEventV1>;
 }
 
 export function defineGameSharedContractV1<

@@ -6,16 +6,18 @@ import { join } from "node:path";
 import {
   roomConnectionOpenResponseSchema,
   roomConnectionPollResponseSchema,
+  seatIdSchema,
   serverMessageSchema,
   type ServerMessage,
 } from "@tabletop/protocol";
 import { ulid } from "ulid";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 
 import { PasswordService } from "../auth/password.js";
 import type { AppConfig } from "../config.js";
 import { serverGameRegistry } from "../games/registry.js";
+import { SlidingWindowRateLimiter } from "../lib/rate-limiter.js";
 import { createRuntime } from "../runtime.js";
 
 type TestRuntime = Awaited<ReturnType<typeof createRuntime>>;
@@ -400,6 +402,48 @@ describe("RoomConnectionGateway", () => {
       payload: { code: "ROOM_PERMISSION_DENIED" },
       type: "command.error",
     });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("silently limits malformed and binary frame floods before validation", async () => {
+    const { origin, runtime, wsUrl } = await startTestRuntime(cleanups);
+    runtime.repositories.accounts.create({
+      passwordHash: await new PasswordService(1).hash("frame-limit-password"),
+      username: "帧限流测试",
+    });
+    const cookies = await login(runtime, "帧限流测试", "frame-limit-password");
+    const socket = await openSocket(wsUrl, origin, cookies, cleanups);
+    const received: ServerMessage[] = [];
+    const onMessage = (data: WebSocket.RawData, isBinary: boolean) => {
+      if (isBinary) return;
+      received.push(serverMessageSchema.parse(JSON.parse(data.toString("utf8"))));
+    };
+    socket.on("message", onMessage);
+
+    const frameCount = 256;
+    const pong = once(socket, "pong");
+    for (let index = 0; index < frameCount; index += 1) {
+      if (index % 2 === 0) {
+        socket.send("{");
+      } else {
+        socket.send(Buffer.from([index]));
+      }
+    }
+    socket.ping("frame-limit-barrier");
+    await pong;
+    socket.off("message", onMessage);
+
+    const errors = received.filter((message) => message.type === "command.error");
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.length).toBeLessThan(frameCount);
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({ code: "VALIDATION_FAILED" }),
+          type: "command.error",
+        }),
+      ]),
+    );
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 
@@ -877,6 +921,283 @@ describe("RoomConnectionGateway", () => {
       latestMoveCount,
     );
     expect(resumed.revision).toBeGreaterThan(latest.revision);
+  }, 30_000);
+
+  it("forwards validated transient game events only from the active seat", async () => {
+    const { origin, runtime, wsUrl } = await startTestRuntime(cleanups);
+    const passwordHash = await new PasswordService(1).hash("transient-password");
+    const hostAccount = runtime.repositories.accounts.create({
+      passwordHash,
+      username: "临时事件房主",
+    });
+    const guestAccount = runtime.repositories.accounts.create({
+      passwordHash,
+      username: "临时事件玩家",
+    });
+    const hostCookies = await login(runtime, hostAccount.username, "transient-password");
+    const guestCookies = await login(runtime, guestAccount.username, "transient-password");
+    const createdResponse = await runtime.app.inject({
+      headers: unsafeHeaders(hostCookies, origin),
+      method: "POST",
+      payload: {
+        gameId: "billiards",
+        name: "临时瞄准同步房",
+        practice: false,
+        settings: { mode: "chinese-eight-ball", tableFriction: 0.2 },
+      },
+      url: "/api/v1/rooms",
+    });
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json() as { joinTicket: string; roomId: string };
+    const guestTicketResponse = await runtime.app.inject({
+      headers: unsafeHeaders(guestCookies, origin),
+      method: "POST",
+      payload: {},
+      url: `/api/v1/rooms/${created.roomId}/join-ticket`,
+    });
+    expect(guestTicketResponse.statusCode).toBe(200);
+    const guestTicket = guestTicketResponse.json() as { joinTicket: string };
+
+    const hostSocket = await openSocket(wsUrl, origin, hostCookies, cleanups);
+    const guestSocket = await openSocket(wsUrl, origin, guestCookies, cleanups);
+    const hostJoinedPromise = waitForSnapshot(hostSocket, created.roomId);
+    send(hostSocket, {
+      payload: { joinTicket: created.joinTicket },
+      protocol: 1,
+      requestId: ulid(),
+      type: "room.join",
+    });
+    await hostJoinedPromise;
+    const guestJoinedPromise = waitForSnapshot(guestSocket, created.roomId);
+    send(guestSocket, {
+      payload: { joinTicket: guestTicket.joinTicket },
+      protocol: 1,
+      requestId: ulid(),
+      type: "room.join",
+    });
+    const guestJoined = await guestJoinedPromise;
+    const hostMember = guestJoined.payload.members.find(
+      ({ accountId }) => accountId === hostAccount.id,
+    );
+    const guestMember = guestJoined.payload.members.find(
+      ({ accountId }) => accountId === guestAccount.id,
+    );
+    if (!hostMember || !guestMember) throw new Error("双人房间缺少已连接成员");
+
+    const room = runtime.rooms.require(created.roomId);
+    await room.claimSeat(hostMember.memberId, seatIdSchema.parse("seat-1"), room.state.revision);
+    await room.claimSeat(guestMember.memberId, seatIdSchema.parse("seat-2"), room.state.revision);
+    await room.setReady(hostMember.memberId, true, room.state.revision);
+    await room.setReady(guestMember.memberId, true, room.state.revision);
+    await room.startMatch(hostMember.memberId, room.state.revision);
+    const matchId = room.state.match?.matchId;
+    if (matchId === undefined) throw new Error("台球对局未创建");
+
+    const previewRequestId = ulid();
+    const receivedPromise = waitForServerMessage(
+      guestSocket,
+      (message) => message.type === "game.transient" && message.matchId === matchId,
+    );
+    send(hostSocket, {
+      matchId,
+      payload: {
+        angle: Math.PI / 4,
+        elevation: 12,
+        power: 68,
+        shotNumber: 0,
+        tip: { x: 0.25, y: -0.15 },
+        type: "billiards.aim-preview",
+      },
+      protocol: 1,
+      requestId: previewRequestId,
+      roomId: created.roomId,
+      type: "game.transient",
+    });
+    await expect(receivedPromise).resolves.toMatchObject({
+      payload: {
+        event: { elevation: 12, power: 68, type: "billiards.aim-preview" },
+        senderSeatId: "seat-1",
+      },
+      type: "game.transient",
+    });
+
+    const duplicateMessages: ServerMessage[] = [];
+    const collectDuplicate = (data: WebSocket.RawData, isBinary: boolean) => {
+      if (!isBinary) {
+        duplicateMessages.push(serverMessageSchema.parse(JSON.parse(data.toString("utf8"))));
+      }
+    };
+    hostSocket.on("message", collectDuplicate);
+    guestSocket.on("message", collectDuplicate);
+    const duplicateBarrier = waitForSnapshot(guestSocket, created.roomId, (message) =>
+      message.payload.chat.some(({ text }) => text === "临时事件去重屏障"),
+    );
+    send(hostSocket, {
+      matchId,
+      payload: {
+        angle: Math.PI / 4,
+        elevation: 12,
+        power: 68,
+        shotNumber: 0,
+        tip: { x: 0.25, y: -0.15 },
+        type: "billiards.aim-preview",
+      },
+      protocol: 1,
+      requestId: previewRequestId,
+      roomId: created.roomId,
+      type: "game.transient",
+    });
+    send(hostSocket, {
+      payload: { text: "临时事件去重屏障" },
+      protocol: 1,
+      requestId: ulid(),
+      roomId: created.roomId,
+      type: "chat.send",
+    });
+    await duplicateBarrier;
+    hostSocket.off("message", collectDuplicate);
+    guestSocket.off("message", collectDuplicate);
+    expect(
+      duplicateMessages.some(
+        (message) =>
+          (message.type === "room.snapshot" && message.causedBy === previewRequestId) ||
+          (message.type === "game.transient" && message.payload.event.power === 68),
+      ),
+    ).toBe(false);
+
+    const authoritativeRequestId = ulid();
+    const authoritativeText = "权威请求去重隔离";
+    const authoritativeCreated = waitForSnapshot(hostSocket, created.roomId, (message) =>
+      message.payload.chat.some(({ text }) => text === authoritativeText),
+    );
+    send(hostSocket, {
+      payload: { text: authoritativeText },
+      protocol: 1,
+      requestId: authoritativeRequestId,
+      roomId: created.roomId,
+      type: "chat.send",
+    });
+    await authoritativeCreated;
+
+    const rateLimit = vi
+      .spyOn(SlidingWindowRateLimiter.prototype, "consume")
+      .mockReturnValue({ allowed: true, remaining: 1, retryAfterMs: 0 });
+    cleanups.push(() => rateLimit.mockRestore());
+    const lastFloodPreview = waitForServerMessage(
+      guestSocket,
+      (message) =>
+        message.type === "game.transient" && message.payload.event.angle === Math.PI / 129,
+    );
+    for (let index = 1; index <= 129; index += 1) {
+      send(hostSocket, {
+        matchId,
+        payload: {
+          angle: Math.PI / index,
+          elevation: 0,
+          power: 50,
+          shotNumber: 0,
+          tip: { x: 0, y: 0 },
+          type: "billiards.aim-preview",
+        },
+        protocol: 1,
+        requestId: ulid(),
+        roomId: created.roomId,
+        type: "game.transient",
+      });
+    }
+    await lastFloodPreview;
+
+    const replayBarrierText = "权威请求重放屏障";
+    const replayBarrier = waitForSnapshot(hostSocket, created.roomId, (message) =>
+      message.payload.chat.some(({ text }) => text === replayBarrierText),
+    );
+    send(hostSocket, {
+      payload: { text: authoritativeText },
+      protocol: 1,
+      requestId: authoritativeRequestId,
+      roomId: created.roomId,
+      type: "chat.send",
+    });
+    send(hostSocket, {
+      payload: { text: replayBarrierText },
+      protocol: 1,
+      requestId: ulid(),
+      roomId: created.roomId,
+      type: "chat.send",
+    });
+    const afterReplay = await replayBarrier;
+    expect(afterReplay.payload.chat.filter(({ text }) => text === authoritativeText)).toHaveLength(
+      1,
+    );
+
+    const deniedPromise = waitForServerMessage(
+      guestSocket,
+      (message) => message.type === "command.error",
+    );
+    send(guestSocket, {
+      matchId,
+      payload: {
+        angle: 0,
+        elevation: 0,
+        power: 50,
+        shotNumber: 0,
+        tip: { x: 0, y: 0 },
+        type: "billiards.aim-preview",
+      },
+      protocol: 1,
+      requestId: ulid(),
+      roomId: created.roomId,
+      type: "game.transient",
+    });
+    await expect(deniedPromise).resolves.toMatchObject({
+      payload: { code: "ROOM_PERMISSION_DENIED" },
+      type: "command.error",
+    });
+
+    const bufferedAmount = vi
+      .spyOn(WebSocket.prototype, "bufferedAmount", "get")
+      .mockImplementation(function (this: WebSocket) {
+        return (this as WebSocket & { readonly _isServer?: boolean })._isServer ? 1024 * 1024 : 0;
+      });
+    cleanups.push(() => bufferedAmount.mockRestore());
+    const backloggedMessages: ServerMessage[] = [];
+    const onBackloggedMessage = (data: WebSocket.RawData, isBinary: boolean) => {
+      if (isBinary) return;
+      backloggedMessages.push(serverMessageSchema.parse(JSON.parse(data.toString("utf8"))));
+    };
+    guestSocket.on("message", onBackloggedMessage);
+    const authoritativeSnapshot = waitForSnapshot(guestSocket, created.roomId, (message) =>
+      message.payload.chat.some(({ text }) => text === "权威消息背压验证"),
+    );
+    send(hostSocket, {
+      matchId,
+      payload: {
+        angle: Math.PI / 3,
+        elevation: 18,
+        power: 72,
+        shotNumber: 0,
+        tip: { x: -0.2, y: 0.1 },
+        type: "billiards.aim-preview",
+      },
+      protocol: 1,
+      requestId: ulid(),
+      roomId: created.roomId,
+      type: "game.transient",
+    });
+    send(hostSocket, {
+      payload: { text: "权威消息背压验证" },
+      protocol: 1,
+      requestId: ulid(),
+      roomId: created.roomId,
+      type: "chat.send",
+    });
+    await expect(authoritativeSnapshot).resolves.toMatchObject({ type: "room.snapshot" });
+    guestSocket.off("message", onBackloggedMessage);
+    expect(
+      backloggedMessages.some(
+        (message) => message.type === "game.transient" && message.payload.event.power === 72,
+      ),
+    ).toBe(false);
   }, 30_000);
 
   it("destroys only matching rooms on game shutdown and every room on site shutdown", async () => {

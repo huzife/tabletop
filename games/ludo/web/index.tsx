@@ -103,15 +103,16 @@ export function LudoSettingsEditor({
 export function LudoGameView(props: GameViewPropsV1<LudoView, LudoAction, LudoDisplayStep>) {
   const { view, dispatchAction, actionPending, connectionState, readOnly } = props;
   const { animatedPlanes, isAnimating } = useLudoPlaneAnimations(props.displayEvents, view);
+  const displayedDeadlineRemainingMs = useDisplayedDeadlineRemainingMs(view);
   const DiceIcon = view.roll === null ? Dice5 : (DICE_ICONS[view.roll] ?? Dice5);
   const activeSeat = view.seats.find((seat) => seat.seatId === view.currentSeatId);
   const latestStep = props.displayEvents.at(-1) ?? view.lastSteps.at(-1);
   const deadlinePercent =
-    view.deadlineRemainingMs === null
+    displayedDeadlineRemainingMs === null
       ? 0
       : Math.max(
           0,
-          Math.min(100, (view.deadlineRemainingMs / (view.phaseTimeSeconds * 1_000)) * 100),
+          Math.min(100, (displayedDeadlineRemainingMs / (view.phaseTimeSeconds * 1_000)) * 100),
         );
   const disabled = actionPending || readOnly || connectionState !== "connected" || isAnimating;
 
@@ -142,7 +143,7 @@ export function LudoGameView(props: GameViewPropsV1<LudoView, LudoAction, LudoDi
           )}
           <span>
             {connectionState === "connected"
-              ? formatRemaining(view.deadlineRemainingMs)
+              ? formatRemaining(displayedDeadlineRemainingMs)
               : connectionLabel(connectionState)}
           </span>
         </div>
@@ -222,6 +223,27 @@ export function LudoGameView(props: GameViewPropsV1<LudoView, LudoAction, LudoDi
       </main>
     </div>
   );
+}
+
+function useDisplayedDeadlineRemainingMs(view: LudoView): number | null {
+  const [displayedRemainingMs, setDisplayedRemainingMs] = useState(view.deadlineRemainingMs);
+
+  useEffect(() => {
+    const { deadlineRemainingMs } = view;
+    setDisplayedRemainingMs(deadlineRemainingMs);
+    if (deadlineRemainingMs === null || deadlineRemainingMs === 0) return undefined;
+
+    const startedAt = performance.now();
+    const timer = window.setInterval(() => {
+      const nextRemainingMs = Math.max(0, deadlineRemainingMs - (performance.now() - startedAt));
+      setDisplayedRemainingMs(nextRemainingMs);
+      if (nextRemainingMs === 0) window.clearInterval(timer);
+    }, 250);
+
+    return () => window.clearInterval(timer);
+  }, [view]);
+
+  return displayedRemainingMs;
 }
 
 function LudoBoard({

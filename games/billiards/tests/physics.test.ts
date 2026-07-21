@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { BilliardsShot } from "../shared/actions.js";
 import type { BilliardsBall } from "../shared/view.js";
-import { simulateBilliardsShot } from "../physics/index.js";
+import { billiardsSurfaceParameters, simulateBilliardsShot } from "../physics/index.js";
+import { tableSpecFor } from "../shared/table.js";
 
 function ball(id: string, kind: BilliardsBall["kind"], x: number, y: number): BilliardsBall {
   return {
@@ -32,6 +33,105 @@ const mode = "chinese-eight-ball" as const;
 const centreY = 1.26 / 2;
 
 describe("billiards shot simulation", () => {
+  it("maps the room friction coefficient across cloth and both cushion models", () => {
+    const chinese = tableSpecFor("chinese-eight-ball");
+    const snooker = tableSpecFor("snooker");
+    const standardChinese = billiardsSurfaceParameters(chinese, 0.2);
+    const standardSnooker = billiardsSurfaceParameters(snooker, 0.2);
+    const fastChinese = billiardsSurfaceParameters(chinese, 0.12);
+    const slowChinese = billiardsSurfaceParameters(chinese, 0.28);
+
+    // 0.20 is the old simulator tuning, so existing rooms retain the same feel.
+    expect(standardChinese).toMatchObject({
+      cushionFriction: 0.12,
+      cushionRestitution: chinese.cushionRestitution,
+      cushionTangentialResponse: 0.075,
+      rollingDeceleration: 0.16,
+      sideSpinDamping: 0.72,
+      slidingFriction: 0.2,
+    });
+    expect(standardSnooker.cushionRestitution).toBe(snooker.cushionRestitution);
+
+    expect(fastChinese.rollingDeceleration).toBeLessThan(standardChinese.rollingDeceleration);
+    expect(fastChinese.cushionFriction).toBeLessThan(standardChinese.cushionFriction);
+    expect(fastChinese.cushionRestitution).toBeGreaterThan(standardChinese.cushionRestitution);
+    expect(slowChinese.rollingDeceleration).toBeGreaterThan(standardChinese.rollingDeceleration);
+    expect(slowChinese.cushionTangentialResponse).toBeGreaterThan(
+      standardChinese.cushionTangentialResponse,
+    );
+    expect(slowChinese.cushionRestitution).toBeLessThan(standardChinese.cushionRestitution);
+  });
+
+  it("retains the legacy trajectory at the standard friction and varies distance and rebound", () => {
+    const rollingBalls = [ball("cue", "cue", 0.55, centreY)];
+    const legacy = simulateBilliardsShot({
+      balls: rollingBalls,
+      mode,
+      shot: shot({ power: 8 }),
+    });
+    const standard = simulateBilliardsShot({
+      balls: rollingBalls,
+      mode,
+      shot: shot({ power: 8 }),
+      tableFriction: 0.2,
+    });
+    const fast = simulateBilliardsShot({
+      balls: rollingBalls,
+      mode,
+      shot: shot({ power: 8 }),
+      tableFriction: 0.12,
+    });
+    const slow = simulateBilliardsShot({
+      balls: rollingBalls,
+      mode,
+      shot: shot({ power: 8 }),
+      tableFriction: 0.28,
+    });
+
+    expect(standard).toEqual(legacy);
+    expect(fast.durationMs).toBeGreaterThan(slow.durationMs);
+    expect(fast.balls[0]!.x).toBeGreaterThan(slow.balls[0]!.x);
+
+    const reboundBalls = [ball("cue", "cue", 2.08, centreY)];
+    const fastRebound = simulateBilliardsShot({
+      balls: reboundBalls,
+      captureFrames: true,
+      mode,
+      shot: shot({ power: 24 }),
+      tableFriction: 0.12,
+    });
+    const slowRebound = simulateBilliardsShot({
+      balls: reboundBalls,
+      captureFrames: true,
+      mode,
+      shot: shot({ power: 24 }),
+      tableFriction: 0.28,
+    });
+
+    expect(fastRebound.railContactBallIds).toContain("cue");
+    expect(slowRebound.railContactBallIds).toContain("cue");
+    expect(fastRebound.balls[0]!.x).toBeLessThan(slowRebound.balls[0]!.x);
+  });
+
+  it("applies the same cloth-friction travel model to the full-size snooker table", () => {
+    const snookerBalls = [ball("cue", "cue", 0.55, 1.778 / 2)];
+    const fast = simulateBilliardsShot({
+      balls: snookerBalls,
+      mode: "snooker",
+      shot: shot({ power: 8 }),
+      tableFriction: 0.12,
+    });
+    const slow = simulateBilliardsShot({
+      balls: snookerBalls,
+      mode: "snooker",
+      shot: shot({ power: 8 }),
+      tableFriction: 0.28,
+    });
+
+    expect(fast.durationMs).toBeGreaterThan(slow.durationMs);
+    expect(fast.balls[0]!.x).toBeGreaterThan(slow.balls[0]!.x);
+  });
+
   it("is deterministic, finite, and replays optional frames", () => {
     const balls = [ball("cue", "cue", 0.45, centreY), ball("one", "solid", 1.2, centreY)];
     const first = simulateBilliardsShot({ balls, mode, shot: shot(), captureFrames: true });

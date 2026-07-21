@@ -1,7 +1,11 @@
 import { Button } from "@tabletop/ui";
 import { Crosshair, Flag, LoaderCircle, Wifi, WifiOff } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { GameConnectionStateV1, GameViewPropsV1 } from "@tabletop/game-sdk/web";
+import type {
+  GameConnectionStateV1,
+  GameViewPropsV1,
+  ReceivedGameTransientEventV1,
+} from "@tabletop/game-sdk/web";
 
 import { simulateBilliardsShot } from "../physics/index.js";
 import type {
@@ -23,7 +27,14 @@ import type {
   BilliardsView,
 } from "../shared/view.js";
 import { tableSpecFor } from "../shared/table.js";
-import { constrainCueTip, cueTipFromPointer, describeCueTip, nudgeCueTip } from "./controls.js";
+import { billiardsAimPreviewSchema, type BilliardsAimPreview } from "../shared/transient.js";
+import {
+  constrainCueTip,
+  cueTipFromPointer,
+  describeCueTip,
+  normalizeDegrees,
+  nudgeCueTip,
+} from "./controls.js";
 import {
   drawBilliardsTable,
   tableGeometry,
@@ -117,8 +128,10 @@ export function BilliardsGameView({
   actionPending,
   connectionState,
   dispatchAction,
+  dispatchTransientEvent,
   displayEvents,
   readOnly,
+  transientEvent,
   view,
 }: GameViewPropsV1<BilliardsView, BilliardsAction, BilliardsDisplayEvent>) {
   const { animatedBalls, isAnimating } = useBilliardsPlayback(displayEvents);
@@ -126,6 +139,7 @@ export function BilliardsGameView({
   const [elevation, setElevation] = useState(0);
   const [tip, setTip] = useState<CueTip>({ x: 0, y: 0 });
   const [angle, setAngle] = useState(() => defaultAimAngle(view));
+  const [controlsShotNumber, setControlsShotNumber] = useState(view.shotNumber);
   const [nominatedColor, setNominatedColor] = useState<SnookerColor>("black");
   const disabled = actionPending || readOnly || connectionState !== "connected" || isAnimating;
   const shotControlsDisabled = disabled || !view.legalActions.canShoot;
@@ -134,12 +148,29 @@ export function BilliardsGameView({
   const aimEnabled = !disabled && view.phase === "aiming" && view.legalActions.canShoot;
   const balls = animatedBalls ?? view.balls;
   const pendingDecision = view.pendingDecision ?? null;
+  const opponentAim = opponentAimPreview(view, transientEvent, isAnimating);
+  const localAim =
+    controlsShotNumber === view.shotNumber
+      ? { angle, elevation, power, tip }
+      : { angle: defaultAimAngle(view), elevation: 0, power: 58, tip: { x: 0, y: 0 } };
+  const displayedAim = opponentAim ?? localAim;
 
-  useEffect(() => {
+  useAimPreviewBroadcast({
+    angle: localAim.angle,
+    elevation: localAim.elevation,
+    enabled: aimEnabled && !view.practice && dispatchTransientEvent !== undefined,
+    power: localAim.power,
+    send: dispatchTransientEvent,
+    shotNumber: view.shotNumber,
+    tip: localAim.tip,
+  });
+
+  useLayoutEffect(() => {
     setAngle(defaultAimAngle(view));
     setTip({ x: 0, y: 0 });
     setPower(58);
     setElevation(0);
+    setControlsShotNumber(view.shotNumber);
   }, [view.mode, view.shotNumber]);
 
   useEffect(() => {
@@ -149,11 +180,11 @@ export function BilliardsGameView({
 
   const shoot = () => {
     const shot: BilliardsShot = {
-      angle: normalizeAngle(angle),
-      elevation,
+      angle: normalizeAngle(localAim.angle),
+      elevation: localAim.elevation,
       nominatedColor: view.mode === "snooker" && view.snookerOn === "color" ? nominatedColor : null,
-      power,
-      tip: constrainCueTip(tip.x, tip.y),
+      power: localAim.power,
+      tip: constrainCueTip(localAim.tip.x, localAim.tip.y),
     };
     dispatchAction({ type: "billiards.shoot", shot });
   };
@@ -163,17 +194,18 @@ export function BilliardsGameView({
       <div className="billiards-layout">
         <main className="billiards-table-zone">
           <BilliardsCanvas
-            aimAngle={angle}
+            aimAngle={displayedAim.angle}
             aimEnabled={aimEnabled}
+            aimVisible={aimEnabled || opponentAim !== null}
             balls={balls}
-            elevation={elevation}
+            elevation={displayedAim.elevation}
             mode={view.mode}
             onAimAngleChange={setAngle}
             onPlaceCue={(point) => dispatchAction({ type: "billiards.place-cue", ...point })}
             placementEnabled={cuePlacementEnabled}
             showOutcome={!isAnimating}
             table={view.table}
-            tip={tip}
+            tip={displayedAim.tip}
             view={view}
           />
         </main>
@@ -220,7 +252,21 @@ export function BilliardsGameView({
           </section>
 
           {pendingDecision === null ? (
-            <section className="billiards-controls" aria-label="击球参数">
+            <section
+              className="billiards-controls"
+              aria-label={opponentAim === null ? "击球参数" : "对手击球参数"}
+            >
+              {opponentAim !== null ? (
+                <div aria-live="polite" className="billiards-opponent-aim">
+                  <span>
+                    <Crosshair aria-hidden="true" size={14} />
+                    {view.viewerSeatId === null ? "当前玩家正在瞄准" : "对手正在瞄准"}
+                  </span>
+                  <output>
+                    方向 {Math.round(normalizeDegrees((opponentAim.angle * 180) / Math.PI))}°
+                  </output>
+                </div>
+              ) : null}
               <RangeControl
                 disabled={shotControlsDisabled}
                 id="billiards-power"
@@ -229,9 +275,13 @@ export function BilliardsGameView({
                 min={1}
                 onChange={setPower}
                 suffix="%"
-                value={power}
+                value={displayedAim.power}
               />
-              <TipSelector disabled={shotControlsDisabled} onChange={setTip} value={tip} />
+              <TipSelector
+                disabled={shotControlsDisabled}
+                onChange={setTip}
+                value={displayedAim.tip}
+              />
               <RangeControl
                 disabled={shotControlsDisabled}
                 id="billiards-elevation"
@@ -240,7 +290,7 @@ export function BilliardsGameView({
                 min={0}
                 onChange={setElevation}
                 suffix="°"
-                value={elevation}
+                value={displayedAim.elevation}
               />
               {!view.practice && view.mode === "snooker" && view.snookerOn === "color" ? (
                 <ColorNomination
@@ -383,6 +433,7 @@ function DecisionPanel({
 function BilliardsCanvas({
   aimAngle,
   aimEnabled,
+  aimVisible,
   balls,
   elevation,
   mode,
@@ -396,6 +447,7 @@ function BilliardsCanvas({
 }: {
   readonly aimAngle: number;
   readonly aimEnabled: boolean;
+  readonly aimVisible: boolean;
   readonly balls: readonly CanvasBall[];
   readonly elevation: number;
   readonly mode: BilliardsMode;
@@ -482,13 +534,14 @@ function BilliardsCanvas({
     if (context === null) return;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawBilliardsTable(context, geometry, spec, mode, balls, aimAngle, elevation, tip, {
-      aimEnabled,
+      aimEnabled: aimVisible,
       placementValid,
       ...(placementEnabled && hoverPoint !== undefined ? { placementPoint: hoverPoint } : {}),
     });
   }, [
     aimAngle,
     aimEnabled,
+    aimVisible,
     balls,
     elevation,
     geometry,
@@ -876,6 +929,7 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
           captureFrames: true,
           mode: event.mode,
           shot: event.shot,
+          tableFriction: event.tableFriction,
         }) as {
           readonly checksum: string;
           readonly frames?: readonly RawPlaybackFrame[];
@@ -908,6 +962,93 @@ function useReducedMotion(): boolean {
     return () => media.removeEventListener("change", onChange);
   }, []);
   return reduced;
+}
+
+function useAimPreviewBroadcast(options: {
+  readonly angle: number;
+  readonly elevation: number;
+  readonly enabled: boolean;
+  readonly power: number;
+  readonly send: GameViewPropsV1<
+    BilliardsView,
+    BilliardsAction,
+    BilliardsDisplayEvent
+  >["dispatchTransientEvent"];
+  readonly shotNumber: number;
+  readonly tip: CueTip;
+}): void {
+  const latestRef = useRef<BilliardsAimPreview>({
+    angle: normalizeAngle(options.angle),
+    elevation: options.elevation,
+    power: options.power,
+    shotNumber: options.shotNumber,
+    tip: constrainCueTip(options.tip.x, options.tip.y),
+    type: "billiards.aim-preview",
+  });
+  const sendRef = useRef(options.send);
+  const timerRef = useRef<number | null>(null);
+  const lastSentAtRef = useRef(0);
+  sendRef.current = options.send;
+  latestRef.current = {
+    angle: normalizeAngle(options.angle),
+    elevation: options.elevation,
+    power: options.power,
+    shotNumber: options.shotNumber,
+    tip: constrainCueTip(options.tip.x, options.tip.y),
+    type: "billiards.aim-preview",
+  };
+
+  useEffect(() => {
+    if (!options.enabled) {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+      return;
+    }
+    const flush = () => {
+      timerRef.current = null;
+      lastSentAtRef.current = Date.now();
+      sendRef.current?.(latestRef.current);
+    };
+    const delayMs = Math.max(0, lastSentAtRef.current + 80 - Date.now());
+    if (delayMs === 0) flush();
+    else if (timerRef.current === null) timerRef.current = window.setTimeout(flush, delayMs);
+  }, [
+    options.angle,
+    options.elevation,
+    options.enabled,
+    options.power,
+    options.shotNumber,
+    options.tip.x,
+    options.tip.y,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
+}
+
+export function opponentAimPreview(
+  view: BilliardsView,
+  transientEvent: ReceivedGameTransientEventV1 | null | undefined,
+  isAnimating = false,
+): BilliardsAimPreview | null {
+  if (
+    transientEvent === null ||
+    transientEvent === undefined ||
+    view.practice ||
+    isAnimating ||
+    view.phase !== "aiming" ||
+    view.activeSeatId === null ||
+    view.activeSeatId === view.viewerSeatId ||
+    transientEvent.senderSeatId !== view.activeSeatId
+  ) {
+    return null;
+  }
+  const parsed = billiardsAimPreviewSchema.safeParse(transientEvent.event);
+  return parsed.success && parsed.data.shotNumber === view.shotNumber ? parsed.data : null;
 }
 
 function eventKey(event: BilliardsShotDisplayEvent): string {

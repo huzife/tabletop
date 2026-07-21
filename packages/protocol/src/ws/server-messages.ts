@@ -13,6 +13,7 @@ import {
   utcDateTimeSchema,
 } from "../ids.js";
 import type { JsonValue } from "../json.js";
+import { gameTransientPayloadSchema } from "./client-commands.js";
 import {
   memberConnectionStatusSchema,
   roomSnapshotPayloadSchema,
@@ -102,6 +103,17 @@ export const roomConnectionChangedMessageSchema = z.strictObject({
   }),
 });
 
+export const gameTransientMessageSchema = z.strictObject({
+  ...serverEnvelopeFields,
+  type: z.literal("game.transient"),
+  roomId: roomIdSchema,
+  matchId: matchIdSchema,
+  payload: z.strictObject({
+    senderSeatId: seatIdSchema,
+    event: gameTransientPayloadSchema,
+  }),
+});
+
 export const serviceStatusChangedMessageSchema = z.strictObject({
   ...serverEnvelopeFields,
   type: z.literal("service.status.changed"),
@@ -125,6 +137,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
   roomSnapshotMessageSchema,
   roomClosedMessageSchema,
   roomConnectionChangedMessageSchema,
+  gameTransientMessageSchema,
   serviceStatusChangedMessageSchema,
 ]);
 
@@ -141,6 +154,7 @@ export type RoomSnapshotMessage<
 export type CommandAckMessage = z.infer<typeof commandAckMessageSchema>;
 export type CommandErrorMessage = z.infer<typeof commandErrorMessageSchema>;
 export type ConnectionReadyMessage = z.infer<typeof connectionReadyMessageSchema>;
+export type GameTransientMessage = z.infer<typeof gameTransientMessageSchema>;
 export type RoomClosedMessage = z.infer<typeof roomClosedMessageSchema>;
 export type RoomConnectionChangedMessage = z.infer<typeof roomConnectionChangedMessageSchema>;
 export type ServerMessage = z.infer<typeof serverMessageSchema>;

@@ -16,8 +16,10 @@ import {
   type ClientCommand,
   type ConnectionId,
   type JsonObject,
+  type MatchId,
   type MemberId,
   type RequestId,
+  type SeatId,
   type ServerMessage,
 } from "@tabletop/protocol";
 import type { FastifyInstance } from "fastify";
@@ -42,11 +44,18 @@ import type { RoomPublisher, RoomRuntimeLike } from "./types.js";
 
 const LONG_POLL_TIMEOUT_MS = 15_000;
 const LONG_POLL_LEASE_MS = 45_000;
+const MAX_INBOUND_FRAMES_PER_WINDOW = 120;
+const INBOUND_FRAME_WINDOW_MS = 5_000;
+const MAX_TRANSIENT_WEBSOCKET_BUFFERED_BYTES = 256 * 1024;
+const MAX_SEEN_REQUESTS = 128;
 
 interface GatewayConnectionBase {
   readonly connectionId: ConnectionId;
+  readonly frameRateLimiter: SlidingWindowRateLimiter;
   readonly rateLimiter: SlidingWindowRateLimiter;
+  readonly transientRateLimiter: SlidingWindowRateLimiter;
   readonly seenRequests: Map<RequestId, true>;
+  readonly seenTransientRequests: Map<RequestId, true>;
   readonly sessionToken: string;
   identity: AuthenticatedSession;
   memberId?: MemberId;
@@ -233,7 +242,9 @@ export class RoomConnectionGateway implements RoomPublisher {
       );
       connection.identity = identity;
       connection.transport.touch();
-      await this.#handleMessage(connection, JSON.stringify(request.body));
+      if (this.#acceptInboundFrame(connection)) {
+        await this.#handleMessage(connection, JSON.stringify(request.body));
+      }
       return reply
         .code(202)
         .header("cache-control", "no-store")
@@ -263,10 +274,16 @@ export class RoomConnectionGateway implements RoomPublisher {
     const connectionId = connectionIdSchema.parse(`connection-${ulid()}`);
     const connection: LongPollingGatewayConnection = {
       connectionId,
+      frameRateLimiter: new SlidingWindowRateLimiter({
+        limit: MAX_INBOUND_FRAMES_PER_WINDOW,
+        windowMs: INBOUND_FRAME_WINDOW_MS,
+      }),
       identity,
       kind: "long-polling",
       rateLimiter: new SlidingWindowRateLimiter({ limit: 60, windowMs: 5_000 }),
+      transientRateLimiter: new SlidingWindowRateLimiter({ limit: 30, windowMs: 2_000 }),
       seenRequests: new Map(),
+      seenTransientRequests: new Map(),
       sessionToken,
       transport: new LongPollingTransport(),
     };
@@ -344,10 +361,16 @@ export class RoomConnectionGateway implements RoomPublisher {
     const connection: WebSocketGatewayConnection = {
       alive: true,
       connectionId,
+      frameRateLimiter: new SlidingWindowRateLimiter({
+        limit: MAX_INBOUND_FRAMES_PER_WINDOW,
+        windowMs: INBOUND_FRAME_WINDOW_MS,
+      }),
       identity: authentication.identity,
       kind: "websocket",
       rateLimiter: new SlidingWindowRateLimiter({ limit: 60, windowMs: 5_000 }),
+      transientRateLimiter: new SlidingWindowRateLimiter({ limit: 30, windowMs: 2_000 }),
       seenRequests: new Map(),
+      seenTransientRequests: new Map(),
       sessionToken: authentication.sessionToken,
       socket,
     };
@@ -359,6 +382,7 @@ export class RoomConnectionGateway implements RoomPublisher {
       delete connection.pongTimer;
     });
     socket.on("message", (data, isBinary) => {
+      if (!this.#acceptInboundFrame(connection)) return;
       void this.#handleMessage(connection, isBinary ? undefined : data.toString("utf8")).catch(
         (error: unknown) => this.#handleConnectionFailure(connection, error),
       );
@@ -394,19 +418,6 @@ export class RoomConnectionGateway implements RoomPublisher {
 
   async #handleMessage(connection: GatewayConnection, raw: string | undefined): Promise<void> {
     let requestId = requestIdSchema.parse(ulid());
-    const rate = connection.rateLimiter.consume("commands");
-    if (!rate.allowed) {
-      this.#sendCommandError(
-        connection,
-        requestId,
-        new HttpError(429, "RATE_COMMAND_LIMIT", "房间命令发送过于频繁", {
-          retryAfterMs: rate.retryAfterMs,
-        }),
-      );
-      return;
-    }
-    if (!this.#refreshIdentity(connection)) return;
-
     try {
       if (raw === undefined) {
         throw new HttpError(400, "VALIDATION_FAILED", "不支持二进制 WebSocket 消息");
@@ -421,19 +432,47 @@ export class RoomConnectionGateway implements RoomPublisher {
         const parsedRequestId = requestIdSchema.safeParse(parsedJson.requestId);
         if (parsedRequestId.success) requestId = parsedRequestId.data;
       }
+      const transientLane =
+        typeof parsedJson === "object" &&
+        parsedJson !== null &&
+        "type" in parsedJson &&
+        parsedJson.type === "game.transient";
+      const rate = transientLane
+        ? connection.transientRateLimiter.consume("events")
+        : connection.rateLimiter.consume("commands");
+      if (!rate.allowed) {
+        if (transientLane) return;
+        this.#sendCommandError(
+          connection,
+          requestId,
+          new HttpError(429, "RATE_COMMAND_LIMIT", "房间命令发送过于频繁", {
+            retryAfterMs: rate.retryAfterMs,
+          }),
+        );
+        return;
+      }
+      if (!this.#refreshIdentity(connection)) return;
       const command = clientCommandSchema.parse(parsedJson);
       requestId = command.requestId;
-      if (connection.seenRequests.has(requestId)) {
-        if (connection.roomId && connection.memberId) {
+      const seenRequests =
+        command.type === "game.transient"
+          ? connection.seenTransientRequests
+          : connection.seenRequests;
+      if (seenRequests.has(requestId)) {
+        if (command.type !== "game.transient" && connection.roomId && connection.memberId) {
           this.#sendSnapshot(connection, this.#rooms.require(connection.roomId), [], requestId);
         }
         return;
       }
-      this.#rememberRequest(connection, requestId);
+      this.#rememberRequest(seenRequests, requestId);
       await this.#dispatchCommand(connection, command, performance.now());
     } catch (error) {
       this.#sendCommandError(connection, requestId, error);
     }
+  }
+
+  #acceptInboundFrame(connection: GatewayConnection): boolean {
+    return connection.frameRateLimiter.consume("frames").allowed;
   }
 
   async #dispatchCommand(
@@ -536,6 +575,17 @@ export class RoomConnectionGateway implements RoomPublisher {
           receivedAtMonotonicMs,
         );
         break;
+      case "game.transient": {
+        const transient = await room.gameTransient(memberId, command.payload, command.matchId);
+        this.#publishTransient(
+          room,
+          memberId,
+          command.matchId,
+          transient.senderSeatId,
+          transient.event,
+        );
+        return;
+      }
     }
 
     this.#sendCommandAck(connection, command.requestId, room, stateChanged);
@@ -551,6 +601,35 @@ export class RoomConnectionGateway implements RoomPublisher {
       throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前连接没有加入该房间");
     }
     return { memberId: connection.memberId, room: this.#rooms.require(connection.roomId) };
+  }
+
+  #publishTransient(
+    room: RoomRuntime,
+    senderMemberId: MemberId,
+    matchId: MatchId,
+    senderSeatId: SeatId,
+    event: JsonObject & { readonly type: string },
+  ): void {
+    for (const connection of this.#connections.values()) {
+      if (
+        connection.roomId !== room.state.roomId ||
+        connection.memberId === undefined ||
+        connection.memberId === senderMemberId ||
+        !room.state.members.has(connection.memberId) ||
+        !this.#isOpen(connection)
+      ) {
+        continue;
+      }
+      this.#send(connection, {
+        matchId,
+        messageId: ulid(),
+        payload: { event, senderSeatId },
+        protocol: 1,
+        roomId: room.state.roomId,
+        serverTime: new Date().toISOString(),
+        type: "game.transient",
+      });
+    }
   }
 
   #sendSnapshot(
@@ -634,6 +713,12 @@ export class RoomConnectionGateway implements RoomPublisher {
     if (!this.#isOpen(connection)) return;
     const parsed = serverMessageSchema.parse(message);
     if (connection.kind === "websocket") {
+      if (
+        parsed.type === "game.transient" &&
+        connection.socket.bufferedAmount >= MAX_TRANSIENT_WEBSOCKET_BUFFERED_BYTES
+      ) {
+        return;
+      }
       connection.socket.send(JSON.stringify(parsed));
       return;
     }
@@ -742,11 +827,11 @@ export class RoomConnectionGateway implements RoomPublisher {
       : connection.transport.isOpen;
   }
 
-  #rememberRequest(connection: GatewayConnection, requestId: RequestId): void {
-    connection.seenRequests.set(requestId, true);
-    if (connection.seenRequests.size > 128) {
-      const oldest = connection.seenRequests.keys().next().value;
-      if (oldest) connection.seenRequests.delete(oldest);
+  #rememberRequest(seenRequests: Map<RequestId, true>, requestId: RequestId): void {
+    seenRequests.set(requestId, true);
+    if (seenRequests.size > MAX_SEEN_REQUESTS) {
+      const oldest = seenRequests.keys().next().value;
+      if (oldest) seenRequests.delete(oldest);
     }
   }
 }

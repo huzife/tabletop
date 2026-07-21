@@ -12,6 +12,7 @@ import {
   defaultCuePlacement,
   isCuePlacementValid,
   noticeLabel,
+  opponentAimPreview,
   outcomeLabel,
   phaseLabel,
 } from "../web/GameView.js";
@@ -291,6 +292,65 @@ describe("billiards solo practice labels", () => {
   });
 });
 
+describe("billiards opponent aim preview", () => {
+  it("accepts only the current opponent's preview for the current shot", () => {
+    const activeSeatId = seatIdSchema.parse("seat-1");
+    const viewerSeatId = seatIdSchema.parse("seat-2");
+    const view = viewFixture({ activeSeatId, shotNumber: 4, viewerSeatId });
+    const transient = {
+      event: {
+        angle: Math.PI / 3,
+        elevation: 18,
+        power: 72,
+        shotNumber: 4,
+        tip: { x: 0.35, y: -0.2 },
+        type: "billiards.aim-preview",
+      },
+      senderSeatId: activeSeatId,
+      serverTime: "2026-01-01T00:00:00.000Z",
+    } as const;
+
+    expect(opponentAimPreview(view, transient)).toMatchObject({
+      elevation: 18,
+      power: 72,
+      tip: { x: 0.35, y: -0.2 },
+    });
+    expect(opponentAimPreview({ ...view, shotNumber: 5 }, transient)).toBeNull();
+    expect(opponentAimPreview({ ...view, viewerSeatId: activeSeatId }, transient)).toBeNull();
+    expect(opponentAimPreview({ ...view, practice: true }, transient)).toBeNull();
+    expect(opponentAimPreview(view, transient, true)).toBeNull();
+  });
+
+  it("rejects malformed or non-active-seat transient data", () => {
+    const view = viewFixture({ viewerSeatId: seatIdSchema.parse("seat-2") });
+    const base = {
+      senderSeatId: seatIdSchema.parse("seat-1"),
+      serverTime: "2026-01-01T00:00:00.000Z",
+    };
+
+    expect(
+      opponentAimPreview(view, {
+        ...base,
+        event: { power: 200, type: "billiards.aim-preview" },
+      }),
+    ).toBeNull();
+    expect(
+      opponentAimPreview(view, {
+        ...base,
+        event: {
+          angle: 0,
+          elevation: 0,
+          power: 50,
+          shotNumber: 0,
+          tip: { x: 0, y: 0 },
+          type: "billiards.aim-preview",
+        },
+        senderSeatId: seatIdSchema.parse("seat-2"),
+      }),
+    ).toBeNull();
+  });
+});
+
 function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
   const firstSeat = seatIdSchema.parse("seat-1");
   const secondSeat = seatIdSchema.parse("seat-2");
@@ -319,6 +379,7 @@ function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
     ],
     shotNumber: 0,
     snookerOn: null,
+    tableFriction: 0.2,
     table: {
       ballDiameter: 0.05715,
       baulkLineX: 0.635,

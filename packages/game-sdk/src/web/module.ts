@@ -1,7 +1,12 @@
-import type { GameId, JsonObject, JsonValue } from "@tabletop/protocol";
+import type { GameId, JsonObject, JsonValue, SeatId } from "@tabletop/protocol";
 import type { ComponentType } from "react";
 
-import type { GameActionV1, GameDisplayEventV1, GameSharedContractV1 } from "../shared/contract.js";
+import type {
+  GameActionV1,
+  GameDisplayEventV1,
+  GameSharedContractV1,
+  GameTransientEventV1,
+} from "../shared/contract.js";
 import type { GameManifestV1 } from "../shared/manifest.js";
 
 export type GameConnectionStateV1 = "connected" | "reconnecting" | "offline";
@@ -10,6 +15,12 @@ export interface GameSettingsPropsV1<TSettings extends JsonValue> {
   readonly value: TSettings;
   readonly disabled: boolean;
   readonly onChange: (settings: TSettings) => void;
+}
+
+export interface ReceivedGameTransientEventV1 {
+  readonly event: GameTransientEventV1;
+  readonly senderSeatId: SeatId;
+  readonly serverTime: string;
 }
 
 export interface GameViewPropsV1<
@@ -23,6 +34,8 @@ export interface GameViewPropsV1<
   readonly actionPending: boolean;
   readonly connectionState: GameConnectionStateV1;
   readonly readOnly: boolean;
+  readonly transientEvent?: ReceivedGameTransientEventV1 | null;
+  readonly dispatchTransientEvent?: (event: GameTransientEventV1) => void;
 }
 
 export interface GameWebModuleV1<

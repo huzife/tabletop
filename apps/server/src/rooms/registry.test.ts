@@ -23,6 +23,10 @@ const actionSchema = z.discriminatedUnion("type", [
 ]);
 const viewSchema = z.strictObject({ moves: z.number().int(), turn: seatIdSchema });
 const eventSchema = z.strictObject({ type: z.literal("test.moved"), seatId: seatIdSchema });
+const transientEventSchema = z.strictObject({
+  type: z.literal("test.aim-preview"),
+  power: z.number().min(1).max(100),
+});
 
 interface TestState {
   readonly moves: number;
@@ -52,6 +56,7 @@ const shared = defineGameSharedContractV1({
     minPlayers: 2,
   },
   settings: { defaultValue: {}, schema: settingsSchema, summarize: () => [] },
+  transientEventSchema,
   viewSchema,
 });
 
@@ -359,6 +364,33 @@ describe("RoomRegistry and RoomRuntime", () => {
     await created.room.setReady(hostJoin.member.memberId, true, created.room.state.revision);
     await created.room.setReady(joined.member.memberId, true, created.room.state.revision);
     await created.room.startMatch(hostJoin.member.memberId, created.room.state.revision);
+
+    const revisionBeforeTransient = created.room.state.revision;
+    await expect(
+      created.room.gameTransient(
+        hostJoin.member.memberId,
+        { power: 64, type: "test.aim-preview" },
+        created.room.state.match?.matchId ?? "missing",
+      ),
+    ).resolves.toEqual({
+      event: { power: 64, type: "test.aim-preview" },
+      senderSeatId: "seat-1",
+    });
+    expect(created.room.state.revision).toBe(revisionBeforeTransient);
+    await expect(
+      created.room.gameTransient(
+        joined.member.memberId,
+        { power: 64, type: "test.aim-preview" },
+        created.room.state.match?.matchId ?? "missing",
+      ),
+    ).rejects.toMatchObject({ code: "ROOM_PERMISSION_DENIED" });
+    await expect(
+      created.room.gameTransient(
+        hostJoin.member.memberId,
+        { power: 101, type: "test.aim-preview" },
+        created.room.state.match?.matchId ?? "missing",
+      ),
+    ).rejects.toBeInstanceOf(z.ZodError);
 
     const revisionBeforeMove = created.room.state.revision;
     await created.room.gameAction(

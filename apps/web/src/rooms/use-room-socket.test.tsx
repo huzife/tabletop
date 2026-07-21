@@ -1,5 +1,5 @@
 import { act, render, waitFor } from "@testing-library/react";
-import { seatIdSchema } from "@tabletop/protocol";
+import { matchIdSchema, seatIdSchema } from "@tabletop/protocol";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +20,7 @@ class FakeWebSocket extends EventTarget {
   static readonly instances: FakeWebSocket[] = [];
 
   readonly sent: string[] = [];
+  bufferedAmount = 0;
   readyState = FakeWebSocket.CONNECTING;
 
   constructor(readonly url: string) {
@@ -171,6 +172,171 @@ describe("useRoomSocket", () => {
     view.unmount();
   });
 
+  it("sends transient events outside the authoritative pending queue and coalesces rapid updates", async () => {
+    const matchId = matchIdSchema.parse("match-test");
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage({ ...roomSnapshotMessage(), matchId: "match-test" }));
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+
+    act(() => {
+      latest?.sendTransientEvent(matchId, { power: 20, type: "aim.preview" });
+      latest?.sendTransientEvent(matchId, { power: 40, type: "aim.preview" });
+      latest?.sendTransientEvent(matchId, { power: 75, type: "aim.preview" });
+    });
+
+    expect(latest?.pendingCommandTypes).toEqual([]);
+    await waitFor(() =>
+      expect(
+        readSentCommands(socket).filter(
+          (command) =>
+            typeof command === "object" &&
+            command !== null &&
+            "type" in command &&
+            command.type === "game.transient",
+        ),
+      ).toHaveLength(2),
+    );
+    expect(readSentCommands(socket).at(-1)).toMatchObject({
+      matchId: "match-test",
+      payload: { power: 75, type: "aim.preview" },
+      type: "game.transient",
+    });
+    view.unmount();
+  });
+
+  it("keeps only the latest transient event while WebSocket output is backpressured", async () => {
+    const matchId = matchIdSchema.parse("match-test");
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage({ ...roomSnapshotMessage(), matchId: "match-test" }));
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+    vi.useFakeTimers();
+    if (socket === undefined) throw new Error("WebSocket was not created");
+    socket.bufferedAmount = 128 * 1024;
+
+    act(() => {
+      latest?.sendTransientEvent(matchId, { power: 20, type: "aim.preview" });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(80);
+    });
+    act(() => {
+      latest?.sendTransientEvent(matchId, { power: 40, type: "aim.preview" });
+      latest?.sendTransientEvent(matchId, { power: 75, type: "aim.preview" });
+    });
+
+    expect(readSentCommands(socket).filter(isTransientCommand)).toEqual([]);
+    socket.bufferedAmount = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(170);
+    });
+
+    expect(readSentCommands(socket).filter(isTransientCommand)).toHaveLength(1);
+    expect(readSentCommands(socket).at(-1)).toMatchObject({
+      payload: { power: 75, type: "aim.preview" },
+      type: "game.transient",
+    });
+    view.unmount();
+  });
+
+  it("sends an authoritative command immediately and discards a backpressured preview", async () => {
+    const matchId = matchIdSchema.parse("match-test");
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage({ ...roomSnapshotMessage(), matchId: "match-test" }));
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+    vi.useFakeTimers();
+    if (socket === undefined) throw new Error("WebSocket was not created");
+    socket.bufferedAmount = 128 * 1024;
+
+    act(() => {
+      latest?.sendTransientEvent(matchId, { power: 75, type: "aim.preview" });
+      latest?.sendCommand({
+        expectedRevision: 1,
+        payload: { seatId: seatIdSchema.parse("seat-1") },
+        type: "room.seat.claim",
+      });
+    });
+
+    expect(readSentCommands(socket).filter(isTransientCommand)).toEqual([]);
+    expect(readSentCommands(socket).at(-1)).toMatchObject({ type: "room.seat.claim" });
+
+    socket.bufferedAmount = 0;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(readSentCommands(socket).filter(isTransientCommand)).toEqual([]);
+    view.unmount();
+  });
+
+  it("retains an early transient event when the matching match snapshot arrives", async () => {
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage(billiardsSnapshotMessage(undefined, 1)));
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+
+    act(() => socket?.serverMessage(billiardsTransientMessage("match-new", 45)));
+    expect(latest?.transientEvent).toBeNull();
+
+    act(() => socket?.serverMessage(billiardsSnapshotMessage("match-new", 2)));
+    await waitFor(() =>
+      expect(latest?.transientEvent).toMatchObject({
+        event: { power: 45, type: "billiards.aim-preview" },
+        matchId: "match-new",
+      }),
+    );
+    view.unmount();
+  });
+
+  it("publishes a new match preview that arrives before its snapshot", async () => {
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage(billiardsSnapshotMessage("match-old", 1)));
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+
+    act(() => socket?.serverMessage(billiardsTransientMessage("match-old", 30)));
+    await waitFor(() => expect(latest?.transientEvent?.matchId).toBe("match-old"));
+    act(() => socket?.serverMessage(billiardsTransientMessage("match-new", 65)));
+    expect(latest?.transientEvent).toMatchObject({
+      event: { power: 30 },
+      matchId: "match-old",
+    });
+
+    act(() => socket?.serverMessage(billiardsSnapshotMessage("match-new", 2)));
+    await waitFor(() =>
+      expect(latest?.transientEvent).toMatchObject({
+        event: { power: 65, type: "billiards.aim-preview" },
+        matchId: "match-new",
+      }),
+    );
+    view.unmount();
+  });
+
+  it("does not replace the current match preview with an unrelated match event", async () => {
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage(billiardsSnapshotMessage("match-old", 1)));
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+
+    act(() => socket?.serverMessage(billiardsTransientMessage("match-old", 30)));
+    await waitFor(() => expect(latest?.transientEvent?.matchId).toBe("match-old"));
+    act(() => socket?.serverMessage(billiardsTransientMessage("match-unrelated", 90)));
+
+    expect(latest?.transientEvent).toMatchObject({
+      event: { power: 30, type: "billiards.aim-preview" },
+      matchId: "match-old",
+    });
+    view.unmount();
+  });
+
   it("uses HTTP long polling when the browser has no WebSocket implementation", async () => {
     const { commands } = installLongPollingFetch();
     Object.defineProperty(globalThis, "WebSocket", {
@@ -267,6 +433,51 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 function readSentCommands(socket: FakeWebSocket | undefined): unknown[] {
   return (socket?.sent ?? []).map((message) => JSON.parse(message) as unknown);
+}
+
+function isTransientCommand(command: unknown): boolean {
+  return (
+    typeof command === "object" &&
+    command !== null &&
+    "type" in command &&
+    command.type === "game.transient"
+  );
+}
+
+function billiardsSnapshotMessage(matchId: string | undefined, revision: number) {
+  const snapshot = roomSnapshotMessage();
+  return {
+    ...snapshot,
+    ...(matchId === undefined ? {} : { matchId }),
+    payload: {
+      ...snapshot.payload,
+      gameId: "billiards",
+      settings: { mode: "chinese-eight-ball", tableFriction: 0.2 },
+    },
+    revision,
+  };
+}
+
+function billiardsTransientMessage(matchId: string, power: number) {
+  return {
+    matchId,
+    messageId: "00000000-0000-4000-8000-000000000004",
+    payload: {
+      event: {
+        angle: 0.4,
+        elevation: 12,
+        power,
+        shotNumber: 0,
+        tip: { x: 0.2, y: -0.1 },
+        type: "billiards.aim-preview",
+      },
+      senderSeatId: "seat-2",
+    },
+    protocol: 1,
+    roomId: ROOM_ID,
+    serverTime: "2026-07-16T10:00:01.500Z",
+    type: "game.transient",
+  };
 }
 
 function connectionReadyMessage() {

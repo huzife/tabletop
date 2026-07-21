@@ -4,8 +4,22 @@ import { z } from "zod";
 export const billiardsModeSchema = z.enum(["chinese-eight-ball", "snooker"]);
 export type BilliardsMode = z.infer<typeof billiardsModeSchema>;
 
+export const BILLIARDS_TABLE_FRICTION_MIN = 0.12;
+export const BILLIARDS_TABLE_FRICTION_MAX = 0.28;
+export const BILLIARDS_TABLE_FRICTION_STEP = 0.01;
+export const BILLIARDS_TABLE_FRICTION_DEFAULT = 0.2;
+
+export const billiardsTableFrictionSchema = z
+  .number()
+  .finite()
+  .min(BILLIARDS_TABLE_FRICTION_MIN)
+  .max(BILLIARDS_TABLE_FRICTION_MAX)
+  .multipleOf(BILLIARDS_TABLE_FRICTION_STEP)
+  .default(BILLIARDS_TABLE_FRICTION_DEFAULT);
+
 export const billiardsSettingsSchema = z.strictObject({
   mode: billiardsModeSchema,
+  tableFriction: billiardsTableFrictionSchema,
 });
 export type BilliardsSettings = z.infer<typeof billiardsSettingsSchema>;
 
@@ -15,11 +29,27 @@ const MODE_LABELS: Readonly<Record<BilliardsMode, string>> = {
 };
 
 export const billiardsSettings = defineGameSettingsContractV1<BilliardsSettings>({
-  defaultValue: { mode: "chinese-eight-ball" },
+  defaultValue: {
+    mode: "chinese-eight-ball",
+    tableFriction: BILLIARDS_TABLE_FRICTION_DEFAULT,
+  },
   schema: billiardsSettingsSchema,
-  summarize: ({ mode }) => [{ label: "模式", value: MODE_LABELS[mode] }],
+  summarize: ({ mode, tableFriction }) => [
+    { label: "模式", value: MODE_LABELS[mode] },
+    { label: "台面/边库摩擦", value: formatBilliardsTableFriction(tableFriction) },
+  ],
 });
 
 export function formatBilliardsMode(mode: BilliardsMode): string {
   return MODE_LABELS[mode];
+}
+
+export function formatBilliardsTableFriction(tableFriction: number): string {
+  const speed =
+    tableFriction < BILLIARDS_TABLE_FRICTION_DEFAULT
+      ? "快台"
+      : tableFriction > BILLIARDS_TABLE_FRICTION_DEFAULT
+        ? "慢台"
+        : "标准";
+  return `${tableFriction.toFixed(2)}（${speed}）`;
 }
