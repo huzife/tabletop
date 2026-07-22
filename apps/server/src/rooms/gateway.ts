@@ -185,15 +185,6 @@ export class RoomConnectionGateway implements RoomPublisher {
         });
       }
 
-      for (const existing of [...this.#connections.values()]) {
-        if (
-          existing.kind === "long-polling" &&
-          existing.identity.session.id === identity.session.id
-        ) {
-          this.#closeConnection(existing, 4001, "连接已由同一设备接管");
-        }
-      }
-
       const sessionToken = request.cookies[SESSION_COOKIE_NAME];
       if (sessionToken === undefined) {
         throw new HttpError(401, "AUTH_SESSION_EXPIRED", "登录状态已失效，请重新登录");
@@ -499,8 +490,11 @@ export class RoomConnectionGateway implements RoomPublisher {
     }
 
     if (command.type === "room.resume") {
-      const binding = this.#rooms.bindingForSession(connection.identity.session.id);
-      if (!binding || binding.roomId !== command.payload.roomId) {
+      const binding = this.#rooms.bindingForSession(
+        connection.identity.session.id,
+        command.payload.roomId,
+      );
+      if (!binding) {
         throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前会话没有可恢复的房间");
       }
       const room = this.#rooms.require(binding.roomId);

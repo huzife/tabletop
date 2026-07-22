@@ -59,7 +59,7 @@ export class RoomRegistry {
   readonly #inviteRooms = new Map<string, RoomId>();
   readonly #joinTicketTimers = new Map<string, NodeJS.Timeout>();
   readonly #joinTickets = new Map<string, JoinTicketState>();
-  readonly #memberBySession = new Map<SessionId, { memberId: MemberId; roomId: RoomId }>();
+  readonly #membersBySession = new Map<SessionId, Map<RoomId, MemberId>>();
   readonly #passwords: RoomPasswordService;
   readonly #repositories: TabletopRepositories;
   readonly #rooms = new Map<RoomId, RoomRuntime>();
@@ -132,7 +132,6 @@ export class RoomRegistry {
     this.#ensureGameEnabled(gameId);
     const sessionId = sessionIdSchema.parse(input.session.id);
     this.#ensureSessionActive(input.session, input.account.id);
-    this.#ensureSessionAvailable(sessionId);
     const game = this.#games.require(gameId);
     const settings = game.parseSettings(input.settings);
     const name = normalizeRoomName(input.name);
@@ -150,7 +149,6 @@ export class RoomRegistry {
       this.#ensureSiteEnabled();
       this.#ensureGameEnabled(gameId);
       this.#ensureSessionActive(input.session, input.account.id);
-      this.#ensureSessionAvailable(sessionId);
       if (input.isCancelled?.()) {
         throw new HttpError(499, "INTERNAL_ROOM_ABORTED", "建房请求已经取消");
       }
@@ -252,13 +250,13 @@ export class RoomRegistry {
         this.#publisherProxy(),
         {
           onDestroyed: (destroyed) => this.#removeDestroyedRoom(destroyed),
-          onMemberRemoved: (removed) => this.#releaseMemberBinding(removed),
+          onMemberRemoved: (removed) => this.#releaseMemberBinding(state.roomId, removed),
         },
         this.#automation,
       );
       this.#rooms.set(roomId, runtime);
       this.#inviteRooms.set(inviteToken, roomId);
-      this.#memberBySession.set(sessionId, { memberId, roomId });
+      this.#setMemberBinding(sessionId, roomId, memberId);
       const ticket = this.#createJoinTicket({
         memberId,
         roomId,
@@ -279,7 +277,7 @@ export class RoomRegistry {
     this.#ensureGameEnabled(gameIdSchema.parse(room.state.gameId));
     const sessionId = sessionIdSchema.parse(options.session.id);
     this.#ensureSessionActive(options.session);
-    this.#ensureSessionAvailable(sessionId);
+    this.#ensureRoomAvailableForSession(sessionId, room.state.roomId);
     if (room.state.passwordHash) {
       let verified = false;
       try {
@@ -298,7 +296,7 @@ export class RoomRegistry {
     const currentRoom = this.require(room.state.roomId);
     this.#ensureGameEnabled(gameIdSchema.parse(currentRoom.state.gameId));
     this.#ensureSessionActive(options.session);
-    this.#ensureSessionAvailable(sessionId);
+    this.#ensureRoomAvailableForSession(sessionId, currentRoom.state.roomId);
     return this.#createJoinTicket({
       roomId: currentRoom.state.roomId,
       sessionId,
@@ -316,7 +314,7 @@ export class RoomRegistry {
     this.#ensureGameEnabled(gameIdSchema.parse(room.state.gameId));
     const sessionId = sessionIdSchema.parse(options.session.id);
     this.#ensureSessionActive(options.session);
-    this.#ensureSessionAvailable(sessionId);
+    this.#ensureRoomAvailableForSession(sessionId, roomId);
     return this.#createJoinTicket({ roomId, sessionId, source: "invite" });
   }
 
@@ -341,14 +339,12 @@ export class RoomRegistry {
       this.#ensureSessionActive(session, account.id);
       const room = this.require(ticket.roomId);
       this.#ensureGameEnabled(gameIdSchema.parse(room.state.gameId));
-      const existingBinding = this.#memberBySession.get(sessionId);
+      const existingBinding = this.bindingForSession(sessionId, ticket.roomId);
       if (
         existingBinding &&
-        (!ticket.memberId ||
-          existingBinding.roomId !== ticket.roomId ||
-          existingBinding.memberId !== ticket.memberId)
+        (ticket.memberId === undefined || existingBinding.memberId !== ticket.memberId)
       ) {
-        throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前设备已经加入房间");
+        throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前设备已经加入该房间");
       }
       let member = ticket.memberId ? room.state.members.get(ticket.memberId) : undefined;
       member ??= [...room.state.members.values()].find(
@@ -368,16 +364,24 @@ export class RoomRegistry {
         };
         await room.addMember(member);
       }
-      this.#memberBySession.set(sessionId, {
-        memberId: member.memberId,
-        roomId: room.state.roomId,
-      });
+      this.#setMemberBinding(sessionId, room.state.roomId, member.memberId);
       return { member, room };
     });
   }
 
-  bindingForSession(sessionIdInput: string) {
-    return this.#memberBySession.get(sessionIdSchema.parse(sessionIdInput));
+  bindingForSession(sessionIdInput: string, roomIdInput?: string | RoomId) {
+    const sessionId = sessionIdSchema.parse(sessionIdInput);
+    const bindings = this.#membersBySession.get(sessionId);
+    if (!bindings) return undefined;
+    if (roomIdInput !== undefined) {
+      const roomId = roomIdSchema.parse(roomIdInput);
+      const memberId = bindings.get(roomId);
+      return memberId === undefined ? undefined : { memberId, roomId };
+    }
+    const first = bindings.entries().next();
+    if (first.done) return undefined;
+    const [roomId, memberId] = first.value;
+    return { memberId, roomId };
   }
 
   confirmMemberAttached(memberId: MemberId): void {
@@ -413,12 +417,22 @@ export class RoomRegistry {
 
   async removeAccount(accountId: string): Promise<void> {
     const removals: Promise<void>[] = [];
-    for (const room of this.#rooms.values()) {
-      for (const member of room.state.members.values()) {
-        if (member.accountId === accountId) {
-          this.#publisher.disconnectMember(member.memberId, 4004, "账号已被管理员禁用");
-          removals.push(room.leave(member.memberId));
-        }
+    for (const room of [...this.#rooms.values()]) {
+      const memberIds = [...room.state.members.values()]
+        .filter((member) => member.accountId === accountId)
+        .map((member) => member.memberId);
+      for (const memberId of memberIds) {
+        this.#publisher.disconnectMember(memberId, 4004, "账号已被管理员禁用");
+      }
+      if (memberIds.length > 0) {
+        removals.push(
+          (async () => {
+            for (const memberId of memberIds) {
+              if (room.destroyed || !room.state.members.has(memberId)) continue;
+              await room.leave(memberId);
+            }
+          })(),
+        );
       }
     }
     await Promise.all(removals);
@@ -473,13 +487,6 @@ export class RoomRegistry {
     }
   }
 
-  #ensureSessionAvailable(sessionId: SessionId): void {
-    const binding = this.#memberBySession.get(sessionId);
-    if (binding) {
-      throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前设备已经加入其他房间");
-    }
-  }
-
   #ensureSessionActive(session: Session, expectedAccountId = session.accountId): void {
     const currentSession = this.#repositories.sessions.findById(session.id);
     const account = this.#repositories.accounts.findById(expectedAccountId);
@@ -509,6 +516,12 @@ export class RoomRegistry {
     }
   }
 
+  #ensureRoomAvailableForSession(sessionId: SessionId, roomId: RoomId): void {
+    if (this.#membersBySession.get(sessionId)?.has(roomId)) {
+      throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前设备已经加入该房间");
+    }
+  }
+
   #throwPasswordCapacityError(error: unknown): never {
     if (error instanceof RoomPasswordCapacityError) {
       throw new HttpError(429, "RATE_ROOM_LIMIT", "房间密码操作繁忙，请稍后重试", {
@@ -526,10 +539,21 @@ export class RoomRegistry {
     };
   }
 
-  #releaseMemberBinding(member: RoomMemberState): void {
-    const binding = this.#memberBySession.get(member.sessionId);
-    if (binding?.memberId === member.memberId) {
-      this.#memberBySession.delete(member.sessionId);
+  #setMemberBinding(sessionId: SessionId, roomId: RoomId, memberId: MemberId): void {
+    let bindings = this.#membersBySession.get(sessionId);
+    if (!bindings) {
+      bindings = new Map();
+      this.#membersBySession.set(sessionId, bindings);
+    }
+    bindings.set(roomId, memberId);
+  }
+
+  #releaseMemberBinding(roomId: RoomId, member: RoomMemberState): void {
+    const bindings = this.#membersBySession.get(member.sessionId);
+    if (bindings?.get(roomId) !== member.memberId) return;
+    bindings.delete(roomId);
+    if (bindings.size === 0) {
+      this.#membersBySession.delete(member.sessionId);
     }
   }
 
@@ -537,7 +561,7 @@ export class RoomRegistry {
     this.#rooms.delete(state.roomId);
     this.#inviteRooms.delete(state.inviteToken);
     for (const member of state.members.values()) {
-      this.#releaseMemberBinding(member);
+      this.#releaseMemberBinding(state.roomId, member);
     }
   }
 }

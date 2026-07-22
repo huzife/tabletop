@@ -190,7 +190,7 @@ export class RoomRuntime {
         return;
       }
 
-      if (this.state.members.size === 0) {
+      if (!this.#hasActiveMember()) {
         this.destroy("last_human_left", "最后一名真人已离开房间");
         return;
       }
@@ -1042,7 +1042,7 @@ export class RoomRuntime {
           if (this.#destroyEmptySoloPracticeRoom()) {
             return;
           }
-          if (this.state.members.size === 0) {
+          if (!this.#hasActiveMember()) {
             this.destroy("last_human_left", "最后一名真人已离开房间");
             return;
           }
@@ -1204,6 +1204,13 @@ export class RoomRuntime {
   #seatForMember(memberId: MemberId): RoomSeatState | undefined {
     return this.state.seats.find(
       (seat) => seat.occupant?.kind === "human" && seat.occupant.memberId === memberId,
+    );
+  }
+
+  #hasActiveMember(): boolean {
+    return [...this.state.members.values()].some(
+      (member) =>
+        member.connectionStatus === "connected" || member.connectionStatus === "reconnecting",
     );
   }
 

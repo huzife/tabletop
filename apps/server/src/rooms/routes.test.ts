@@ -118,11 +118,10 @@ describe("room HTTP routes", () => {
         }),
       );
     }
-    expect(createResponses[0]?.statusCode).toBe(201);
-    expect(createResponses[0]?.headers["cache-control"]).toBe("no-store");
-    expect(createResponses.slice(1, 5).map(({ statusCode }) => statusCode)).toEqual([
-      409, 409, 409, 409,
+    expect(createResponses.slice(0, 5).map(({ statusCode }) => statusCode)).toEqual([
+      201, 201, 201, 201, 201,
     ]);
+    expect(createResponses[0]?.headers["cache-control"]).toBe("no-store");
     expect(createResponses[5]?.statusCode).toBe(429);
     expect(createResponses[5]?.json()).toMatchObject({ error: { code: "RATE_ROOM_LIMIT" } });
   }, 30_000);

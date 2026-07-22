@@ -420,16 +420,24 @@ describe("RoomRegistry and RoomRuntime", () => {
     await expect(noop).resolves.toBe(false);
     expect(created.room.state.revision).toBe(revisionBeforeConcurrentCommands + 1);
     expect(snapshotCount).toBeGreaterThanOrEqual(8);
-    await expect(
-      registry.createRoom({
-        account: account1,
-        gameId: "test-room",
-        name: "冲突房间",
-        practice: false,
-        session: session1,
-        settings: {},
-      }),
-    ).rejects.toMatchObject({ code: "CONNECTION_ROOM_CONFLICT" });
+    const sameSessionRoom = await registry.createRoom({
+      account: account1,
+      gameId: "test-room",
+      name: "同会话房间",
+      practice: false,
+      session: session1,
+      settings: {},
+    });
+    expect(registry.bindingForSession(session1.id, created.room.state.roomId)).toMatchObject({
+      memberId: hostJoin.member.memberId,
+    });
+    expect(
+      registry.bindingForSession(session1.id, sameSessionRoom.room.state.roomId),
+    ).toMatchObject({ memberId: sameSessionRoom.room.state.hostMemberId });
+    sameSessionRoom.room.destroy("host_closed", "测试结束");
+    expect(registry.bindingForSession(session1.id, created.room.state.roomId)).toMatchObject({
+      memberId: hostJoin.member.memberId,
+    });
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     await created.room.connectionLost(
@@ -446,12 +454,12 @@ describe("RoomRegistry and RoomRuntime", () => {
     created.room.destroy("host_closed", "测试结束");
   });
 
-  it("serializes concurrent room creation for one session", async () => {
+  it("allows concurrent room creation for one session with independent bindings", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers);
     const account = accounts[0]!;
     const session = sessions[0]!;
 
-    const results = await Promise.allSettled([
+    const createdRooms = await Promise.all([
       registry.createRoom({
         account,
         gameId: "test-room",
@@ -470,20 +478,19 @@ describe("RoomRegistry and RoomRuntime", () => {
       }),
     ]);
 
-    const fulfilled = results.filter((result) => result.status === "fulfilled");
-    const rejected = results.filter((result) => result.status === "rejected");
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toHaveLength(1);
-    expect(rejected[0]).toMatchObject({
-      reason: expect.objectContaining({ code: "CONNECTION_ROOM_CONFLICT" }),
-    });
-    expect(registry.listPublicRooms()).toHaveLength(1);
-    if (fulfilled[0]?.status === "fulfilled") {
-      fulfilled[0].value.room.destroy("host_closed", "测试结束");
+    expect(createdRooms).toHaveLength(2);
+    expect(new Set(createdRooms.map(({ room }) => room.state.roomId)).size).toBe(2);
+    expect(registry.listPublicRooms()).toHaveLength(2);
+    for (const { room } of createdRooms) {
+      expect(registry.bindingForSession(session.id, room.state.roomId)).toEqual({
+        memberId: room.state.hostMemberId,
+        roomId: room.state.roomId,
+      });
     }
+    createdRooms.forEach(({ room }) => room.destroy("host_closed", "测试结束"));
   });
 
-  it("serializes concurrent join ticket consumption for one session", async () => {
+  it("allows concurrent join ticket consumption for one session in different rooms", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers, { accountCount: 3 });
     const rooms = await Promise.all(
       [0, 1].map(async (index) => {
@@ -506,23 +513,94 @@ describe("RoomRegistry and RoomRuntime", () => {
       }),
     );
 
-    const results = await Promise.allSettled(
+    const joins = await Promise.all(
       tickets.map((ticket) => registry.consumeJoinTicket(ticket.token, accounts[2]!, sessions[2]!)),
     );
 
-    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter((result) => result.status === "rejected")).toEqual([
+    expect(joins).toHaveLength(2);
+    expect(new Set(joins.map(({ member }) => member.memberId)).size).toBe(2);
+    rooms.forEach((room, index) => {
+      const joined = joins[index]!;
+      expect(room.state.members.get(joined.member.memberId)).toBe(joined.member);
+      expect(registry.bindingForSession(sessions[2]!.id, room.state.roomId)).toEqual({
+        memberId: joined.member.memberId,
+        roomId: room.state.roomId,
+      });
+    });
+    rooms.forEach((room) => room.destroy("host_closed", "测试结束"));
+  });
+
+  it("keeps one member identity when a session consumes concurrent tickets for one room", async () => {
+    const { accounts, registry, sessions } = createTestRegistry(closers, { accountCount: 2 });
+    const created = await registry.createRoom({
+      account: accounts[0]!,
+      gameId: "test-room",
+      name: "同房票据并发",
+      practice: false,
+      session: sessions[0]!,
+      settings: {},
+    });
+    await registry.consumeJoinTicket(created.ticket.token, accounts[0]!, sessions[0]!);
+    const tickets = [
+      registry.issueInviteJoinTicket({
+        inviteToken: created.room.state.inviteToken,
+        session: sessions[1]!,
+      }),
+      registry.issueInviteJoinTicket({
+        inviteToken: created.room.state.inviteToken,
+        session: sessions[1]!,
+      }),
+    ];
+
+    const results = await Promise.allSettled(
+      tickets.map((ticket) => registry.consumeJoinTicket(ticket.token, accounts[1]!, sessions[1]!)),
+    );
+
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(({ status }) => status === "rejected")).toEqual([
       expect.objectContaining({
         reason: expect.objectContaining({ code: "CONNECTION_ROOM_CONFLICT" }),
       }),
     ]);
     expect(
-      rooms.filter((room) =>
-        [...room.state.members.values()].some(({ sessionId }) => sessionId === sessions[2]!.id),
+      [...created.room.state.members.values()].filter(
+        ({ sessionId }) => sessionId === sessions[1]!.id,
       ),
     ).toHaveLength(1);
-    expect(registry.bindingForSession(sessions[2]!.id)).toBeDefined();
-    rooms.forEach((room) => room.destroy("host_closed", "测试结束"));
+    expect(registry.bindingForSession(sessions[1]!.id, created.room.state.roomId)).toBeDefined();
+    created.room.destroy("host_closed", "测试结束");
+  });
+
+  it("releases one room binding without affecting another binding for the same session", async () => {
+    const { accounts, registry, sessions } = createTestRegistry(closers);
+    const account = accounts[0]!;
+    const session = sessions[0]!;
+    const [first, second] = await Promise.all(
+      ["待释放房间", "保留绑定房间"].map((name) =>
+        registry.createRoom({
+          account,
+          gameId: "test-room",
+          name,
+          practice: false,
+          session,
+          settings: {},
+        }),
+      ),
+    );
+    if (!first || !second) throw new Error("测试未创建两个同会话房间");
+    const firstJoin = await registry.consumeJoinTicket(first.ticket.token, account, session);
+    const secondJoin = await registry.consumeJoinTicket(second.ticket.token, account, session);
+
+    await first.room.leave(firstJoin.member.memberId);
+
+    expect(first.room.destroyed).toBe(true);
+    expect(registry.bindingForSession(session.id, first.room.state.roomId)).toBeUndefined();
+    expect(registry.bindingForSession(session.id, second.room.state.roomId)).toEqual({
+      memberId: secondJoin.member.memberId,
+      roomId: second.room.state.roomId,
+    });
+    expect(second.room.destroyed).toBe(false);
+    second.room.destroy("host_closed", "测试结束");
   });
 
   it("releases an unconnected room when its creation ticket expires", async () => {
@@ -616,6 +694,118 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(registry.bindingForSession(sessions[0]!.id)).toBeUndefined();
     expect(created.room.projectSnapshot(guest.member.memberId).room.name).toBe("访客已进入房间");
     created.room.destroy("host_closed", "测试结束");
+  });
+
+  it("keeps the last seated lobby member through reconnect grace and destroys at expiry", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const { accounts, registry, sessions } = createTestRegistry(closers);
+    const created = await registry.createRoom({
+      account: accounts[0]!,
+      gameId: "test-room",
+      name: "大厅重连宽限",
+      practice: false,
+      session: sessions[0]!,
+      settings: {},
+    });
+    const joined = await registry.consumeJoinTicket(
+      created.ticket.token,
+      accounts[0]!,
+      sessions[0]!,
+    );
+    await created.room.attachConnection(joined.member.memberId, "connection-lobby-host");
+    await created.room.claimSeat(
+      joined.member.memberId,
+      seatIdSchema.parse("seat-1"),
+      created.room.state.revision,
+    );
+
+    await created.room.connectionLost(joined.member.memberId, "connection-lobby-host");
+    await vi.advanceTimersByTimeAsync(29_999);
+    await created.room.queue.run(() => undefined);
+
+    expect(created.room.destroyed).toBe(false);
+    expect(joined.member).toMatchObject({ connectionStatus: "reconnecting" });
+    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toEqual({
+      memberId: joined.member.memberId,
+      roomId: created.room.state.roomId,
+    });
+    expect(registry.require(created.room.state.roomId)).toBe(created.room);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await created.room.queue.run(() => undefined);
+
+    expect(created.room.destroyed).toBe(true);
+    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toBeUndefined();
+    expect(() => registry.require(created.room.state.roomId)).toThrowError(
+      expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
+    );
+  });
+
+  it("waits for connected and reconnecting lobby members before destroying the room", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const { accounts, registry, sessions } = createTestRegistry(closers, { accountCount: 2 });
+    const created = await registry.createRoom({
+      account: accounts[0]!,
+      gameId: "test-room",
+      name: "多人大厅断线清理",
+      practice: false,
+      session: sessions[0]!,
+      settings: {},
+    });
+    const host = await registry.consumeJoinTicket(created.ticket.token, accounts[0]!, sessions[0]!);
+    await created.room.attachConnection(host.member.memberId, "connection-lobby-host");
+    await created.room.claimSeat(
+      host.member.memberId,
+      seatIdSchema.parse("seat-1"),
+      created.room.state.revision,
+    );
+    const guestTicket = registry.issueInviteJoinTicket({
+      inviteToken: created.room.state.inviteToken,
+      session: sessions[1]!,
+    });
+    const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
+    await created.room.attachConnection(guest.member.memberId, "connection-lobby-guest");
+    await created.room.claimSeat(
+      guest.member.memberId,
+      seatIdSchema.parse("seat-2"),
+      created.room.state.revision,
+    );
+
+    await created.room.connectionLost(host.member.memberId, "connection-lobby-host");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await created.room.queue.run(() => undefined);
+
+    expect(created.room.destroyed).toBe(false);
+    expect(guest.member.connectionStatus).toBe("connected");
+
+    await created.room.connectionLost(guest.member.memberId, "connection-lobby-guest");
+    await vi.advanceTimersByTimeAsync(20_000);
+    await created.room.queue.run(() => undefined);
+
+    expect(created.room.destroyed).toBe(false);
+    expect(created.room.state.members.get(host.member.memberId)).toBe(host.member);
+    expect(host.member.connectionStatus).toBe("offline");
+    expect(guest.member.connectionStatus).toBe("reconnecting");
+    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toBeUndefined();
+    expect(registry.bindingForSession(sessions[1]!.id, created.room.state.roomId)).toEqual({
+      memberId: guest.member.memberId,
+      roomId: created.room.state.roomId,
+    });
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    await created.room.queue.run(() => undefined);
+
+    expect(created.room.destroyed).toBe(false);
+    expect(guest.member.connectionStatus).toBe("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(1);
+    await created.room.queue.run(() => undefined);
+
+    expect(created.room.destroyed).toBe(true);
+    expect(registry.bindingForSession(sessions[1]!.id, created.room.state.roomId)).toBeUndefined();
+    expect(() => registry.require(created.room.state.roomId)).toThrowError(
+      expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
+    );
   });
 
   it("rechecks game availability after password hashing", async () => {
@@ -885,11 +1075,13 @@ describe("RoomRegistry and RoomRuntime", () => {
     });
     closers.push(() => created.room.destroy("host_closed", "测试结束"));
     const host = await registry.consumeJoinTicket(created.ticket.token, accounts[0]!, sessions[0]!);
+    await created.room.attachConnection(host.member.memberId, "connection-practice-host");
     const guestTicket = registry.issueInviteJoinTicket({
       inviteToken: created.room.state.inviteToken,
       session: sessions[1]!,
     });
     const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
+    await created.room.attachConnection(guest.member.memberId, "connection-practice-spectator");
 
     await created.room.setReady(host.member.memberId, true, created.room.state.revision);
     await created.room.startMatch(host.member.memberId, created.room.state.revision);
@@ -1323,7 +1515,14 @@ describe("RoomRegistry and RoomRuntime", () => {
       seatIdSchema.parse("seat-1"),
       created.room.state.revision,
     );
+    const guestTicket = registry.issueInviteJoinTicket({
+      inviteToken: created.room.state.inviteToken,
+      session: sessions[1]!,
+    });
+    const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
+    await created.room.attachConnection(guest.member.memberId, "connection-reconnecting-guest");
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    await created.room.connectionLost(guest.member.memberId, "connection-reconnecting-guest");
     await created.room.connectionLost(
       host.member.memberId,
       "connection-expiring-host",
@@ -1331,13 +1530,11 @@ describe("RoomRegistry and RoomRuntime", () => {
     );
     await vi.advanceTimersByTimeAsync(0);
     await created.room.queue.run(() => undefined);
+    expect(created.room.destroyed).toBe(false);
+    expect(host.member.connectionStatus).toBe("offline");
+    expect(guest.member.connectionStatus).toBe("reconnecting");
     expect(created.room.state.hostMemberId).toBe(host.member.memberId);
 
-    const guestTicket = registry.issueInviteJoinTicket({
-      inviteToken: created.room.state.inviteToken,
-      session: sessions[1]!,
-    });
-    const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
     await created.room.attachConnection(guest.member.memberId, "connection-late-guest");
 
     expect(created.room.state.hostMemberId).toBe(guest.member.memberId);

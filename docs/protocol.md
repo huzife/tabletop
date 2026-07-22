@@ -61,7 +61,7 @@
 | `POST /api/v1/rooms/:roomId/join-ticket` | 从房间列表进入；校验可选密码并签发 ticket |
 | `POST /api/v1/invites/:inviteToken/join-ticket` | 从邀请链接进入；绕过房间密码并签发 ticket |
 
-房间创建响应同时返回 `roomId`、邀请链接和创建者的短期 join ticket。普通房间进入 ticket 默认 30 秒过期、单次使用，并绑定 `sessionId`、`roomId` 和进入来源。创建者从未连接且 ticket 到期时，平台通过房间队列移除该成员：没有其他真人则销毁房间，已有访客则转移房主并保留房间。ticket 只用于建立房间成员身份，不能替代登录会话。
+房间创建响应同时返回 `roomId`、邀请链接和创建者的短期 join ticket。普通房间进入 ticket 默认 30 秒过期、单次使用，并绑定 `sessionId`、`roomId` 和进入来源。创建者从未连接且 ticket 到期时，平台通过房间队列移除该成员：除空座 `soloPractice` 练习房特例外，没有其他 `connected` 或 `reconnecting` 成员时销毁，仍有活动或等待恢复的访客时转移房主并保留；声明 `soloPractice` 能力的练习房在该操作使全部座位变空时直接销毁，不由观众连接保活。ticket 只用于建立房间成员身份，不能替代登录会话。
 
 邀请令牌使用至少 128 位不可预测随机值。邀请 URL 泄露等价于绕过房间密码，但访问者仍必须登录；房间销毁后令牌失效。
 
@@ -102,6 +102,8 @@
 4. 客户端使用 join ticket 提交 `room.join`，或在重连时提交原房间恢复信息。
 5. 服务端建立成员绑定后发送完整 `room.snapshot`。
 
+每个 `connectionId` 最多绑定一个房间。同一 `sessionId` 可以为多个不同房间分别建立 WebSocket 或长轮询连接，成员恢复绑定按 `sessionId + roomId` 区分；新建一个房间连接不会接管该会话在其他房间的连接。
+
 升级握手后，每个客户端帧先经过不解析载荷的连接级总限流，再解析最小 JSON 信封以选择普通命令或临时事件子限流通道，随后重新验证会话并执行完整 Zod 与房间命令处理；心跳也会周期重验会话。二进制、损坏 JSON 和超限帧不会绕过第一层保护。这样注销、改密、管理员重置或自然过期会关闭已有连接，同时超限帧不会先触发数据库查询。
 
 若 WebSocket 构造或握手失败，或者建立后 5 秒内仍未收到首个房间快照，浏览器自动切换到同源 HTTP 长轮询。已经成功收到过快照的 WebSocket 断开时，客户端先尝试恢复一次 WebSocket；新连接仍无法取得快照时再切换长轮询。这个选择只改变传输，不改变 `connectionId`、命令信封、请求去重、房间绑定、快照或重连语义。
@@ -115,7 +117,7 @@
 | `POST /api/v1/room-connections/:connectionId/commands` | 提交与 WebSocket 完全相同的 `ClientCommand`；`202` 只表示网关接收，业务结果仍由消息返回 |
 | `DELETE /api/v1/room-connections/:connectionId` | 页面离开时主动关闭连接 |
 
-同一长轮询连接只允许一个等待中的 poll，请求或命令会刷新 45 秒连接租约。服务端出站队列最多保留 128 条消息；没有 `causedBy` 的同房间完整快照可以被更新版本替换，同一座位排队中的 `game.transient` 只保留最新值并维持其实际发送顺序。临时事件在队列满时直接丢弃；确认、错误、快照等权威消息会先淘汰一条排队中的临时事件，只有队列全部为不可丢弃消息时才关闭慢连接。租约到期同样会进入正常的 30 秒房间重连流程。
+同一长轮询连接只允许一个等待中的 poll，请求或命令会刷新 45 秒连接租约；同一会话可以为不同房间同时维护多条长轮询连接。服务端出站队列最多保留 128 条消息；没有 `causedBy` 的同房间完整快照可以被更新版本替换，同一座位排队中的 `game.transient` 只保留最新值并维持其实际发送顺序。临时事件在队列满时直接丢弃；确认、错误、快照等权威消息会先淘汰一条排队中的临时事件，只有队列全部为不可丢弃消息时才关闭慢连接。租约到期同样会进入正常的 30 秒房间重连流程。
 
 WebSocket 心跳由服务端每 20 秒发送 ping，10 秒内没有 pong 则关闭连接。当前房间页面为该页面生命周期建立一条活动房间连接；离开页面会关闭连接，重新进入或网络中断后创建新连接。
 
@@ -162,7 +164,7 @@ interface ServerMessage<TPayload> {
 | 类型 | 主要载荷 | 说明 |
 | --- | --- | --- |
 | `room.join` | `joinTicket` | 首次建立房间成员身份，普通加入默认为观众 |
-| `room.resume` | `roomId` | 当前会话在 30 秒窗口内恢复，或完成已预绑定但从未 attach 的首次连接 |
+| `room.resume` | `roomId` | 按 `sessionId + roomId` 在 30 秒窗口内恢复，或完成该房间已预绑定但从未 attach 的首次连接 |
 | `room.leave` | 空 | 主动离开，不进入重连窗口 |
 | `room.rename` | `name` | 房主修改房间名，有效长度 1～30 个 Unicode 字符 |
 | `room.settings.update` | `settings` | 房主在允许阶段修改游戏设置 |
@@ -177,7 +179,7 @@ interface ServerMessage<TPayload> {
 | `room.match.start` | 空 | 房主在开始条件满足时开始 |
 | `chat.send` | `text` | 发送纯文本消息 |
 
-公共命令由房间核心处理。插件可以提供座位显示信息和开始条件补充，但不能绕过房主、成员和设备权限。
+公共命令由房间核心处理。插件可以提供座位显示信息和开始条件补充，但不能绕过房主、成员、单连接房间绑定和座位权限；同一账号不能在同一房间占据两个真人座位。
 
 `room.rename`、设置、座位、AI、准备、房主转移、踢人和开局命令都在信封顶层要求 `roomId` 与 `expectedRevision`。`room.leave` 和 `chat.send` 只要求 `roomId`；`room.join` 不带顶层房间 ID，`room.resume` 把 `roomId` 放在 payload 中。
 
@@ -216,7 +218,7 @@ WebSocket 客户端会合并并限频临时事件；发送缓冲明显积压时�
 | `command.ack` | 命令成功确认；`payload.stateChanged` 表示是否改变房间状态 |
 | `command.error` | 稳定错误码、公开参数和是否应重新同步 |
 | `room.snapshot` | 当前接收者的完整房间、聊天和游戏投影视图 |
-| `room.closed` | 服务关闭、最后真人离开或内部错误导致房间终止 |
+| `room.closed` | 服务关闭、房间已无 `connected` 或 `reconnecting` 成员、空座 `soloPractice` 练习房、或内部错误导致房间终止 |
 | `game.transient` | 由服务端标记发送座位的临时游戏展示事件；不代表权威状态变化 |
 
 除尽力转发的 `game.transient` 外，每个成功命令都产生 `command.ack`，其中 `causedBy` 等于请求的 `requestId`，`stateChanged` 为布尔值；状态变化还会向在线成员广播接收者专属的 `room.snapshot`。客户端不能把“收到快照”当作唯一成功确认，也不能把 `stateChanged: false` 当作失败。
@@ -255,16 +257,18 @@ WebSocket 客户端会合并并限频临时事件；发送缓冲明显积压时�
 
 ## 11. 重连协议
 
-断线时原 `sessionId` 的成员和座位恢复信息保存在房间内存中。房间队列同时向插件提交 `connection.lost` 系统事件；插件可以请求临时自动控制，也可以选择其他自身支持的状态变化。浏览器重新建立 WebSocket 或长轮询连接后发送 `room.resume`，服务端必须确认账号、原会话、房间和仍有效的恢复窗口匹配。若首次 join 是否送达无法确认，已预绑定但从未 attach 的原会话也可以 resume；这种情况只完成连接，不发送 `connection.restored` 游戏系统事件，并取消尚存的创建 ticket 定时器。
+断线时，目标房间按 `sessionId + roomId` 保存原成员和座位恢复信息。房间队列同时向插件提交 `connection.lost` 系统事件；插件可以请求临时自动控制，也可以选择其他自身支持的状态变化。浏览器重新建立 WebSocket 或长轮询连接后发送 `room.resume`，服务端必须确认账号、原会话、目标房间和仍有效的恢复窗口匹配；同一会话在其他房间的绑定不能用于恢复当前房间。若首次 join 是否送达无法确认，已在该房间预绑定但从未 attach 的原会话也可以 resume；这种情况只完成连接，不发送 `connection.restored` 游戏系统事件，并取消尚存的创建 ticket 定时器。
 
 ![图11-1 断线、可选临时接管与快照恢复时序](images/protocol-fig02.png)
 
-临时控制器是插件系统事件返回的通用房间指令，不依赖客户端计时。重连成功后平台向插件提交 `connection.restored`，并按插件结果调整后续控制权；断线期间已经提交的合法动作不会自动撤销。30 秒到期命令同样通过房间队列，并比较成员状态和原 `reconnectUntil`，避免旧任务误触发。
+临时控制器是插件系统事件返回的通用房间指令，不依赖客户端计时。重连成功后平台向插件提交 `connection.restored`，并按插件结果调整后续控制权；断线期间已经提交的合法动作不会自动撤销。每个断线成员都保留完整 30 秒窗口；到期命令同样通过房间队列，并比较成员状态和原 `reconnectUntil`，避免旧任务误触发。
 
-窗口到期后，平台把成员标记为 `offline`、释放该 `sessionId` 的活动房间绑定，并向插件提交 `connection.grace_expired`。插件可以返回比赛结果、控制器变化、座位释放或允许后续取回等通用指令。平台随后执行以下与具体游戏无关的成员处理：
+窗口到期后，平台把成员标记为 `offline`、只释放对应的 `sessionId + roomId` 绑定，并向插件提交 `connection.grace_expired`。插件可以返回比赛结果、控制器变化、座位释放或允许后续取回等通用指令；同一会话在其他房间的连接与绑定不受影响。平台随后执行以下与具体游戏无关的成员处理：
 
-- 没有关联座位的离线观众从成员表删除；如果没有任何真人成员，房间销毁。
+- 没有关联座位的离线观众从成员表删除。
 - 仍有关联座位的成员可以留在成员表。原 `sessionId` 之后通过新的 join ticket 加入同一房间时复用原 `memberId`，不会创建重复成员或重复座位归属。
+- 主动离开或任一窗口到期后，除空座 `soloPractice` 练习房特例外，如果房间已经没有 `connected` 或 `reconnecting` 成员，则销毁房间；只要还有成员等待重连，就保留房间直到其完整 30 秒窗口结束。
+- 声明 `soloPractice` 能力的练习房在全部座位变空时直接销毁，即使仍有观众连接；断线玩家的座位在窗口到期前仍保留，因此该特例不会截短其 30 秒窗口。
 - 到期成员是房主时，平台把房主转给最早加入且当前已连接的其他真人成员；若当时没有这样的成员，则暂留原房主身份，并在之后有成员连接或恢复时再次转移。
 
 若插件允许手动取回，客户端只有在快照 `permissions.reclaimableSeatIds` 包含目标座位后才能发送 `room.seat.reclaim`；平台校验账号、成员和座位所有权，再把请求作为 `seat.reclaim_requested` 系统事件交给插件。新会话或同账号的另一设备不属于 `room.resume`，只能按普通加入与取回权限行动。协议不规定任何具体游戏选择哪种比赛结果。
@@ -277,7 +281,7 @@ WebSocket 客户端会合并并限频临时事件；发送缓冲明显积压时�
 | `SITE_` | `SITE_DISABLED` | 显示维护页 |
 | `GAME_SERVICE_` | `GAME_SERVICE_DISABLED` | 返回首页并刷新游戏目录 |
 | `ROOM_` | `ROOM_FULL`、`ROOM_PASSWORD_INVALID` | 留在加入流程并提示 |
-| `CONNECTION_` | `CONNECTION_ROOM_CONFLICT` | 显示其他设备/房间冲突 |
+| `CONNECTION_` | `CONNECTION_ROOM_CONFLICT` | 显示当前连接已绑定房间、同房成员身份接管或同账号重复占座等连接控制冲突；不得把同一会话进入其他房间视为冲突 |
 | `REVISION_` | `REVISION_STALE` | 请求最新快照，不自动重放危险动作 |
 | `GAME_` | `GAME_ILLEGAL_ACTION` | 恢复按钮状态并展示插件文案 |
 | `RATE_` | `RATE_CHAT_LIMIT` | 暂时禁用发送并显示剩余时间 |
