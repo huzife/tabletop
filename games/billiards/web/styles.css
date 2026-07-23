@@ -588,6 +588,11 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.billiards-settings__surface-controls {
+  display: grid;
+  gap: 14px;
+}
+
 .billiards-settings__mode {
   align-items: center;
   background: #ffffff;

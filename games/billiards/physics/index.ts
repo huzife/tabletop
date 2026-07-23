@@ -11,6 +11,9 @@ import {
 
 import type { BilliardsShot } from "../shared/actions.js";
 import {
+  BILLIARDS_SPIN_CONVERGENCE_DEFAULT,
+  BILLIARDS_SPIN_CONVERGENCE_MAX,
+  BILLIARDS_SPIN_CONVERGENCE_MIN,
   BILLIARDS_TABLE_FRICTION_DEFAULT,
   BILLIARDS_TABLE_FRICTION_MAX,
   BILLIARDS_TABLE_FRICTION_MIN,
@@ -75,6 +78,8 @@ export interface SimulateBilliardsShotInput {
   readonly captureFrames?: boolean;
   readonly mode: BilliardsMode;
   readonly shot: BilliardsShot;
+  /** Multiplies cloth friction only while planar spin converges to pure rolling. */
+  readonly spinConvergence?: number;
   /**
    * The room's cloth-and-cushion friction coefficient. Omitted calls retain
    * the standard 0.20 table so historical replays remain deterministic.
@@ -90,6 +95,7 @@ export interface BilliardsSurfaceParameters {
   readonly rollingDeceleration: number;
   readonly sideSpinDamping: number;
   readonly slidingFriction: number;
+  readonly spinConvergence: number;
 }
 
 interface ActiveBallState {
@@ -134,6 +140,7 @@ interface ShotContext {
 export function billiardsSurfaceParameters(
   table: Readonly<BilliardsTableSpec>,
   tableFriction = BILLIARDS_TABLE_FRICTION_DEFAULT,
+  spinConvergence = BILLIARDS_SPIN_CONVERGENCE_DEFAULT,
 ): BilliardsSurfaceParameters {
   const slidingFriction = clamp(
     finiteOr(tableFriction, BILLIARDS_TABLE_FRICTION_DEFAULT),
@@ -153,6 +160,11 @@ export function billiardsSurfaceParameters(
     rollingDeceleration: BASE_ROLLING_DECELERATION * scale,
     sideSpinDamping: BASE_SIDE_SPIN_DAMPING * scale,
     slidingFriction,
+    spinConvergence: clamp(
+      finiteOr(spinConvergence, BILLIARDS_SPIN_CONVERGENCE_DEFAULT),
+      BILLIARDS_SPIN_CONVERGENCE_MIN,
+      BILLIARDS_SPIN_CONVERGENCE_MAX,
+    ),
   };
 }
 
@@ -400,7 +412,8 @@ function applyClothAndSpin(
   const slipSpeed = Math.hypot(slipX, slipY);
 
   if (slipSpeed > 0.002 && airborneFactor > 0.1) {
-    const maximumVelocityChange = surface.slidingFriction * GRAVITY * FIXED_STEP_SECONDS;
+    const maximumVelocityChange =
+      surface.slidingFriction * surface.spinConvergence * GRAVITY * FIXED_STEP_SECONDS;
     const velocityChange = Math.min(maximumVelocityChange, slipSpeed / 3.5);
     const deltaVx = (-slipX / slipSpeed) * velocityChange;
     const deltaVy = (-slipY / slipSpeed) * velocityChange;
@@ -755,7 +768,7 @@ function checksumFor(result: Omit<ShotSimulationResult, "checksum" | "frames">):
  */
 export function simulateBilliardsShot(input: SimulateBilliardsShotInput): ShotSimulationResult {
   const table = tableSpecFor(input.mode);
-  const surface = billiardsSurfaceParameters(table, input.tableFriction);
+  const surface = billiardsSurfaceParameters(table, input.tableFriction, input.spinConvergence);
   const radius = table.ballDiameter / 2;
   const { ballMaterial, railsByBody, world } = createWorld(table, surface);
   const { active, byBody, byId } = createActiveBalls(input.balls, table, world, ballMaterial);

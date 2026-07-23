@@ -49,6 +49,7 @@ describe("billiards shot simulation", () => {
       rollingDeceleration: 0.16,
       sideSpinDamping: 0.72,
       slidingFriction: 0.2,
+      spinConvergence: 1,
     });
     expect(standardSnooker.cushionRestitution).toBe(snooker.cushionRestitution);
 
@@ -111,6 +112,50 @@ describe("billiards shot simulation", () => {
     expect(fastRebound.railContactBallIds).toContain("cue");
     expect(slowRebound.railContactBallIds).toContain("cue");
     expect(fastRebound.balls[0]!.x).toBeLessThan(slowRebound.balls[0]!.x);
+  });
+
+  it("keeps the default spin convergence backward compatible and makes its rate adjustable", () => {
+    const balls = [ball("cue", "cue", 0.55, centreY)];
+    const omitted = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      mode,
+      shot: shot({ tip: { x: 0, y: 0.75 }, power: 42 }),
+      tableFriction: 0.24,
+    });
+    const explicitDefault = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      mode,
+      shot: shot({ tip: { x: 0, y: 0.75 }, power: 42 }),
+      spinConvergence: 1,
+      tableFriction: 0.24,
+    });
+    const persistent = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      mode,
+      shot: shot({ tip: { x: 0, y: 0.75 }, power: 42 }),
+      spinConvergence: 0.5,
+      tableFriction: 0.24,
+    });
+    const quick = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      mode,
+      shot: shot({ tip: { x: 0, y: 0.75 }, power: 42 }),
+      spinConvergence: 2,
+      tableFriction: 0.24,
+    });
+
+    expect(explicitDefault).toEqual(omitted);
+    const persistentFrame = persistent.frames!.find((frame) => frame.atMs >= 250);
+    const quickFrame = quick.frames!.find((frame) => frame.atMs >= 250);
+    expect(persistentFrame).toBeDefined();
+    expect(quickFrame).toBeDefined();
+    expect(persistentFrame!.balls[0]!.spinY).toBeGreaterThan(quickFrame!.balls[0]!.spinY);
+    expect(persistent.durationMs).toBeGreaterThan(0);
+    expect(quick.durationMs).toBeGreaterThan(0);
   });
 
   it("applies the same cloth-friction travel model to the full-size snooker table", () => {

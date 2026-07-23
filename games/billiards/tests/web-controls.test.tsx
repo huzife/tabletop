@@ -379,6 +379,7 @@ function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
     ],
     shotNumber: 0,
     snookerOn: null,
+    spinConvergence: 1,
     tableFriction: 0.2,
     table: {
       ballDiameter: 0.05715,

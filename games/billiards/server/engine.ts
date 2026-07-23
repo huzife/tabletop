@@ -104,6 +104,7 @@ function transitionForShot(
     balls: initialBalls,
     mode: state.settings.mode,
     shot: action.shot,
+    spinConvergence: state.settings.spinConvergence,
     tableFriction: state.settings.tableFriction,
   }) as BilliardsSimulationResult;
   const resolution = state.practice
@@ -130,6 +131,7 @@ function transitionForShot(
     shot: action.shot,
     shotNumber: resolution.state.shotNumber,
     simulationChecksum: simulation.checksum,
+    spinConvergence: state.settings.spinConvergence,
     tableFriction: state.settings.tableFriction,
     type: "billiards.shot",
   };
@@ -344,6 +346,7 @@ export function projectBilliardsView(
     practice: state.practice,
     shotNumber: state.shotNumber,
     snookerOn: state.snookerOn,
+    spinConvergence: state.settings.spinConvergence,
     tableFriction: state.settings.tableFriction,
     table: {
       ballDiameter: table.ballDiameter,

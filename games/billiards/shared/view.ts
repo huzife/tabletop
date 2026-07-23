@@ -8,7 +8,11 @@ import {
   billiardsShotSchema,
   snookerColorSchema,
 } from "./actions.js";
-import { billiardsModeSchema, billiardsTableFrictionSchema } from "./settings.js";
+import {
+  billiardsModeSchema,
+  billiardsSpinConvergenceSchema,
+  billiardsTableFrictionSchema,
+} from "./settings.js";
 
 export const billiardsBallKindSchema = z.enum([
   "cue",
@@ -143,6 +147,7 @@ export const billiardsViewSchema = z.strictObject({
   practice: z.boolean(),
   shotNumber: z.number().int().nonnegative(),
   snookerOn: snookerOnSchema.nullable(),
+  spinConvergence: billiardsSpinConvergenceSchema,
   tableFriction: billiardsTableFrictionSchema,
   table: tableViewSchema,
   viewerSeatId: seatIdSchema.nullable(),
@@ -161,6 +166,7 @@ const shotDisplayEventSchema = z.strictObject({
   shot: billiardsShotSchema,
   shotNumber: z.number().int().positive(),
   simulationChecksum: z.string().regex(/^[a-f0-9]{8}$/),
+  spinConvergence: billiardsSpinConvergenceSchema,
   tableFriction: billiardsTableFrictionSchema,
   type: z.literal("billiards.shot"),
 });
