@@ -230,7 +230,7 @@ curl --fail http://127.0.0.1/api/v1
 nginx -t
 ```
 
-预期 Node.js 只监听 `127.0.0.1:3000`，公网只通过 Nginx 的 `80` 端口进入：
+预期 Node.js 只监听 `127.0.0.1:3000`，公网只通过 Nginx 进入：HTTP 临时模式监听 80；启用 TLS 后由 80 跳转到 443，并由 443 提供应用：
 
 ```bash
 ss -lntp
@@ -250,6 +250,6 @@ free -h
 
 不要手工删除当前或前一个 release，也不要在生产 SQLite 主库上使用 `drizzle-kit push` 或随意执行 SQL。`deploy.sh` 会保留当前和上一个 release，目标提交仍在指定远端分支时，可通过 `deploy --branch <branch> --revision <known-good-commit>` 回到已知稳定版本。
 
-## 6. 当前 HTTP 限制
+## 6. HTTP 临时模式与 HTTPS
 
-当前入口为公网 IP 的 HTTP `80`，仅适合阶段性联调。用户名、密码和 Cookie 在传输中没有 TLS 保护。取得域名后，应按[部署与运维设计](deployment.md)第 9 节配置 HTTPS、把 `COOKIE_SECURE` 改为 `true`，并重新验证登录、后台写操作、WebSocket 和长轮询降级。
+直接通过 HTTP `80` 提供应用仅适合阶段性联调；用户名、密码和 Cookie 在传输中没有 TLS 保护。正式入口应按[部署与运维设计](deployment.md)第 9 节配置 HTTPS，让 80 只负责跳转到 443，把 `COOKIE_SECURE` 改为 `true`，并重新验证登录、后台写操作、WebSocket 和长轮询降级。

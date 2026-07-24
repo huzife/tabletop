@@ -14,14 +14,15 @@
 | `scripts/operations.sh` | 已发布服务器的状态、日志、启停、发布、备份和恢复包装命令 |
 | `scripts/migrate-db.mjs` | 调用已构建数据库包的正式迁移入口 |
 | `deploy/tabletop.env.example` | 生产环境变量模板，不包含真实秘密 |
-| `deploy/nginx/tabletop.conf` | HTTP、静态资源、API、长轮询和 WebSocket 入口 |
+| `deploy/nginx/tabletop.conf` | HTTP 入口，以及 HTTP/HTTPS 共用的 Nginx `map` 和 `upstream` |
+| `deploy/nginx/tabletop-server.conf` | 可由 HTTP 和 HTTPS 虚拟主机共用的静态资源、API、长轮询和 WebSocket 规则 |
 | `deploy/systemd/` | 应用 service 与每日备份 service/timer |
 
 ## 1. 部署拓扑
 
 ```mermaid
 flowchart LR
-  browser["Chrome / Edge<br/>HTTP :80"] --> nginx["Nginx<br/>静态页面 / API / 长轮询 / WebSocket"]
+  browser["Chrome / Edge<br/>HTTP :80 / HTTPS :443"] --> nginx["Nginx<br/>静态页面 / API / 长轮询 / WebSocket"]
   nginx --> node["tabletop.service<br/>Node.js 22 / 127.0.0.1:3000"]
   nginx --> release["/opt/tabletop/current<br/>网页构建"]
   node --> release
@@ -52,7 +53,7 @@ root 负责 provision、发布、恢复以及 systemd/Nginx 管理。网络进�
 ### 3.1 前置条件
 
 1. 使用 root 登录受支持的 Linux 服务器。
-2. 确认云安全组允许 TCP 22 和 80。脚本只能配置机器内的 UFW，不能修改云平台安全组。
+2. 确认云安全组允许 TCP 22、80 和 443。脚本只能配置机器内的 UFW，不能修改云平台安全组。
 3. 通过 HTTPS 把仓库检出到服务器上的临时管理目录，例如 `/root/tabletop-bootstrap`。仓库地址由执行者在本机配置，不写入仓库；服务器不配置代码托管平台的 SSH 密钥。
 4. 确认工作目录中的部署资产来自准备发布的提交，而不是未审查的本地文件。
 
@@ -69,8 +70,8 @@ bash scripts/provision-server.sh
 2. 创建 `tabletop` 系统用户和第 2 节目录，不覆盖已有数据库。
 3. 首次创建 `/etc/tabletop/tabletop.env`，并在服务器本机生成 64 个十六进制字符的随机 `SESSION_SECRET`；重复执行保留现有环境文件和秘密。
 4. 按服务器内存情况创建并启用 swap，把 `vm.swappiness` 设置为 10。
-5. 安装 Nginx 与 systemd 配置，启用 Nginx、应用开机启动和每日备份 timer。首次发布前不会启动应用。
-6. 启用 UFW，设置默认拒绝入站、允许出站，并增加 OpenSSH 和 `80/tcp` 放行规则。
+5. 安装 Nginx、共用的 Tabletop server 规则与 systemd 配置，启用 Nginx、应用开机启动和每日备份 timer。首次发布前不会启动应用。
+6. 启用 UFW，设置默认拒绝入站、允许出站，并增加 OpenSSH、`80/tcp` 和 `443/tcp` 放行规则。
 
 provision 不会克隆应用 release、初始化管理员、创建数据库或启动尚未发布的应用。部署资产有修改时，应从新提交的检出目录重新运行 provision，使 `/etc/nginx` 和 `/etc/systemd/system` 与仓库同步；环境文件仍不会被覆盖。
 
@@ -183,6 +184,8 @@ Nginx 配置包含：
 - `/health/live` 与 `/health/ready` 只允许本机访问。
 - 单个请求体上限 64 KiB，拒绝 dotfile 和 sourcemap 请求，并设置基础安全响应头。
 
+仓库中的 `deploy/nginx/tabletop.conf` 定义共用的 WebSocket `map`、Node.js `upstream` 和默认 HTTP 虚拟主机；该虚拟主机通过 `/etc/nginx/snippets/tabletop-server.conf` 引入上述应用规则。HTTPS 虚拟主机必须引用同一个片段，不能复制这些 `location`，否则后续规则更新可能只在一个入口生效。
+
 `tabletop.service` 设置 10 秒应用优雅关闭窗口之外的 systemd 停止宽限、失败重启、文件描述符限制和以下主要沙箱：
 
 - 只读系统目录，只允许写 `/var/lib/tabletop` 和私有临时目录。
@@ -201,7 +204,7 @@ curl --fail http://127.0.0.1/api/v1
 ss -lntp
 ```
 
-预期只有 Nginx 监听公网 80，Node.js 3000 仅监听 `127.0.0.1`。
+预期公网应用端口只由 Nginx 监听：HTTP 临时模式为 80，启用 TLS 后为 80 和 443；Node.js 3000 始终只监听 `127.0.0.1`。
 
 ## 6. 备份
 
@@ -297,19 +300,46 @@ sqlite3 /var/lib/tabletop/tabletop.db 'PRAGMA integrity_check;'
 
 明文 HTTP 只能用于阶段性联调，不是安全的长期生产入口。用户名、密码和 Cookie 在传输中没有 TLS 保护；Argon2id、HttpOnly、SameSite、CSRF 和限流都不能替代链路加密。
 
-获得域名后应完成：
+获得域名后，先配置 DNS，并确认云安全组与 UFW 都允许 TCP 22、80 和 443。安装受信任证书后，在证书工具或管理员维护的独立站点文件中配置域名重定向和 TLS 虚拟主机。以下模板中的三个尖括号占位符必须替换为当前部署值：
 
-1. 配置 DNS 与云安全组 443。
-2. 安装受信任证书，让 Nginx 监听 443，并将 80 永久重定向到 HTTPS。
-3. 把 `/etc/tabletop/tabletop.env` 的 `COOKIE_SECURE` 改为 `true`。
-4. 重启应用，清理旧 Cookie，重新验证登录、改密、管理接口、WebSocket Origin 和长轮询 CSRF。
+```nginx
+server {
+  listen 80;
+  listen [::]:80;
+  server_name <domain-name>;
 
-证书和私钥只能保存在服务器受限目录中，不能加入本仓库。
+  return 301 https://<domain-name>$request_uri;
+}
+
+server {
+  listen 443 ssl;
+  listen [::]:443 ssl;
+  server_name <domain-name>;
+
+  ssl_certificate <certificate-fullchain-path>;
+  ssl_certificate_key <certificate-private-key-path>;
+
+  include /etc/nginx/snippets/tabletop-server.conf;
+}
+```
+
+例如可把替换完成的配置保存为 `/etc/nginx/sites-available/tabletop-tls.conf`，启用、检查后再重载：
+
+```bash
+ln -sfn /etc/nginx/sites-available/tabletop-tls.conf \
+  /etc/nginx/sites-enabled/zz-tabletop-tls.conf
+nginx -t
+systemctl reload nginx.service
+```
+
+保留 `/etc/nginx/sites-enabled/tabletop.conf`：它提供 TLS 站点引用的 `map`、`upstream` 和共享片段安装契约。TLS 链接使用 `zz-` 前缀，使 Nginx 展开 `sites-enabled/*` 时先加载 `tabletop.conf`，再加载引用这些共享定义的 TLS 虚拟主机。同一域名只保留一个监听 443 的 `server`；已有 TLS 站点时应修改它或禁用冲突站点，避免 Nginx 忽略新配置。不要把域名、证书路径或 TLS 指令写入 `/etc/nginx/sites-available/tabletop.conf` 或 `/etc/nginx/snippets/tabletop-server.conf`；后续 provision 会用仓库版本刷新这两个文件。独立的 `tabletop-tls.conf` 不由 provision 覆盖或删除，因此证书工具维护的部署值会保留，同时应用规则会随共享片段更新。
+
+把 `/etc/tabletop/tabletop.env` 的 `COOKIE_SECURE` 改为 `true`，然后执行 `systemctl restart tabletop.service`。清理浏览器中的旧 Cookie，重新验证登录、改密、管理接口、WebSocket Origin 和长轮询 CSRF。证书和私钥只能保存在服务器受限目录中，不能加入本仓库。
 
 ## 10. 验收清单
 
 - 服务器重启后 Nginx 与 Tabletop 自动启动，SQLite 数据和服务开关保留。
-- UFW 与云安全组只开放必要的 22、80；公网无法连接 3000。
+- UFW 与云安全组只开放必要的 22、80、443；公网无法连接 3000。
 - 普通用户不能注册，管理员 CLI 只能初始化一个管理员，后台可以管理账号和服务开关。
 - 两个浏览器可以建立房间、完成 WebSocket 对局、聊天和 30 秒内重连；模拟 WebSocket 被禁用后可通过 HTTP 长轮询完成建连、进房和房间命令。
 - 发布会终止内存对局但保留账号数据；构建或健康检查失败不留下半发布版本。

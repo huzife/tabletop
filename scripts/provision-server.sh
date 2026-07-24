@@ -31,6 +31,7 @@ require_assets() {
   for asset in \
     "$deploy_dir/tabletop.env.example" \
     "$deploy_dir/nginx/tabletop.conf" \
+    "$deploy_dir/nginx/tabletop-server.conf" \
     "$deploy_dir/systemd/tabletop.service" \
     "$deploy_dir/systemd/tabletop-backup.service" \
     "$deploy_dir/systemd/tabletop-backup.timer"; do
@@ -179,6 +180,9 @@ configure_swap() {
 
 install_service_configuration() {
   log "installing Nginx and systemd configuration"
+  install -d -o root -g root -m 0755 /etc/nginx/snippets
+  install -o root -g root -m 0644 "$deploy_dir/nginx/tabletop-server.conf" \
+    /etc/nginx/snippets/tabletop-server.conf
   install -o root -g root -m 0644 "$deploy_dir/nginx/tabletop.conf" \
     /etc/nginx/sites-available/tabletop.conf
   ln -sfn /etc/nginx/sites-available/tabletop.conf /etc/nginx/sites-enabled/tabletop.conf
@@ -202,11 +206,12 @@ install_service_configuration() {
 }
 
 configure_firewall() {
-  log "allowing SSH and HTTP through UFW"
+  log "allowing SSH, HTTP, and HTTPS through UFW"
   ufw default deny incoming
   ufw default allow outgoing
   ufw allow OpenSSH
   ufw allow 80/tcp
+  ufw allow 443/tcp
   ufw --force enable
 }
 
