@@ -3,6 +3,7 @@ import {
   type JsonWasmAbiAdapter,
   type WasmExports,
 } from "./wasm-json.js";
+import type { SceneDocument } from "@tabletop/scene/schema";
 import type {
   BilliardsCoreInfo,
   BilliardsTrajectoryPrediction,
@@ -20,6 +21,11 @@ import type {
 } from "../server/state.js";
 
 type BilliardsCoreRequest =
+  | {
+      readonly mode: BilliardsMode;
+      readonly op: "configure-table-scene";
+      readonly scene: SceneDocument;
+    }
   | {
       readonly op: "create-match";
       readonly seatIds: readonly string[];
@@ -81,6 +87,14 @@ export class BilliardsCoreError extends Error {
 
 export function bindBilliardsCore(exports: WasmExports): BilliardsCore {
   return createJsonWasmAbiAdapter<BilliardsCoreRequest, BilliardsCoreResponse>(exports);
+}
+
+export function configureBilliardsTableSceneWithCore(
+  core: BilliardsCore,
+  mode: BilliardsMode,
+  scene: SceneDocument,
+): void {
+  requestCore(core, { mode, op: "configure-table-scene", scene });
 }
 
 export function simulateBilliardsShotWithCore(

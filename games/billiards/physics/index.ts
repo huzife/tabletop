@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   bindBilliardsCore,
+  configureBilliardsTableSceneWithCore,
   createBilliardsMatchStateWithCore,
   getBilliardsCoreInfoWithCore,
   getBilliardsTableSpecWithCore,
@@ -27,6 +28,7 @@ import type {
   BilliardsMatchState,
   BilliardsSimulationResult,
 } from "../server/state.js";
+import { loadNodeBilliardsTableScenes } from "./scene-node.js";
 import type { WasmExports } from "./wasm-json.js";
 
 export * from "./types.js";
@@ -38,17 +40,23 @@ const CORE_WASM_PATH = resolve(
 );
 
 function loadBilliardsCore(): BilliardsCore {
+  const scenes = loadNodeBilliardsTableScenes();
+  let core: BilliardsCore;
   try {
     const bytes = readFileSync(CORE_WASM_PATH);
     const wasm = nodeWasmRuntime();
     const module = new wasm.Module(bytes);
-    return bindBilliardsCore(new wasm.Instance(module, {}).exports);
+    core = bindBilliardsCore(new wasm.Instance(module, {}).exports);
   } catch (cause) {
     throw new Error(
       "Unable to load the billiards WASM core. Build the native core before starting the Node runtime.",
       { cause },
     );
   }
+  for (const [mode, scene] of scenes) {
+    configureBilliardsTableSceneWithCore(core, mode, scene.document);
+  }
+  return core;
 }
 
 interface NodeWasmRuntime {

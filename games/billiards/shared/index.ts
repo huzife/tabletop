@@ -1,6 +1,7 @@
 export * from "./actions.js";
 export * from "./contract.js";
 export * from "./manifest.js";
+export * from "./scene.js";
 export * from "./settings.js";
 export * from "./table.js";
 export * from "./transient.js";

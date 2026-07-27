@@ -626,34 +626,6 @@
   opacity: 0.54;
 }
 
-.billiards-settings__diagram {
-  background: #f4f7f5;
-  border: 1px solid #d8ded9;
-  border-radius: 6px;
-  margin: 0;
-  overflow: hidden;
-}
-
-.billiards-settings__diagram a {
-  display: block;
-}
-
-.billiards-settings__diagram img {
-  aspect-ratio: 1672 / 941;
-  display: block;
-  height: auto;
-  object-fit: contain;
-  width: 100%;
-}
-
-.billiards-settings__diagram figcaption {
-  border-top: 1px solid #d8ded9;
-  color: #58635d;
-  font-size: 11px;
-  line-height: 1.4;
-  padding: 7px 9px;
-}
-
 @keyframes billiards-spin {
   to {
     transform: rotate(360deg);

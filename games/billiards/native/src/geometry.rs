@@ -4,10 +4,9 @@ use crate::model::{
     TableSpec,
 };
 use serde::Deserialize;
+use serde_json::Value;
 use std::sync::OnceLock;
 
-const CHINESE_EIGHT_BALL_SCENE_JSON: &str =
-    include_str!("../../web/assets/chinese-eight-ball-table.json");
 const POOLTOOL_POCKET_DEPTH: f64 = 0.08;
 
 #[derive(Clone, Copy, Debug)]
@@ -232,6 +231,18 @@ struct SceneCanvas {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 enum SceneElement {
+    #[serde(rename = "image")]
+    Image {
+        name: String,
+        role: String,
+        visible: bool,
+        rotation: f64,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        source: String,
+    },
     #[serde(rename = "ellipse")]
     Ellipse {
         name: String,
@@ -405,16 +416,61 @@ impl TableGeometry {
     }
 }
 
-fn chinese_eight_ball_scene() -> &'static ChineseEightBallScene {
-    CHINESE_EIGHT_BALL_SCENE.get_or_init(|| {
-        parse_chinese_eight_ball_scene(CHINESE_EIGHT_BALL_SCENE_JSON)
-            .expect("bundled Chinese eight-ball scene must be valid")
-    })
+pub(crate) fn configure_table_scene(mode: BilliardsMode, value: Value) -> Result<(), String> {
+    match mode {
+        BilliardsMode::ChineseEightBall => {
+            let scene = parse_chinese_eight_ball_scene(value)?;
+            let outer_width = scene.canvas_width * scene.calibration.scale_x(2.540);
+            let outer_height = scene.canvas_height * scene.calibration.scale_y(1.270);
+            if (outer_width - 2.830).abs() > EPSILON || (outer_height - 1.550).abs() > EPSILON {
+                return Err(
+                    "Chinese eight-ball scene must map to a 2.830 m by 1.550 m outer table"
+                        .to_owned(),
+                );
+            }
+            let _ = CHINESE_EIGHT_BALL_SCENE.set(scene);
+            Ok(())
+        }
+        BilliardsMode::Snooker => {
+            Err("snooker does not have a scene description file yet".to_owned())
+        }
+    }
 }
 
-fn parse_chinese_eight_ball_scene(json: &str) -> Result<ChineseEightBallScene, String> {
+pub(crate) fn ensure_table_scene_configured(mode: BilliardsMode) -> Result<(), String> {
+    match mode {
+        BilliardsMode::ChineseEightBall if CHINESE_EIGHT_BALL_SCENE.get().is_none() => {
+            Err("Chinese eight-ball table scene has not been loaded".to_owned())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn chinese_eight_ball_scene() -> &'static ChineseEightBallScene {
+    #[cfg(test)]
+    {
+        CHINESE_EIGHT_BALL_SCENE.get_or_init(load_test_chinese_eight_ball_scene)
+    }
+    #[cfg(not(test))]
+    {
+        CHINESE_EIGHT_BALL_SCENE
+            .get()
+            .expect("Chinese eight-ball scene must be configured before using the core")
+    }
+}
+
+#[cfg(test)]
+fn load_test_chinese_eight_ball_scene() -> ChineseEightBallScene {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../scenes/chinese-eight-ball/table.json");
+    let json = std::fs::read_to_string(path).expect("read Chinese eight-ball scene fixture");
+    let value = serde_json::from_str(&json).expect("parse Chinese eight-ball scene fixture JSON");
+    parse_chinese_eight_ball_scene(value).expect("validate Chinese eight-ball scene fixture")
+}
+
+fn parse_chinese_eight_ball_scene(value: Value) -> Result<ChineseEightBallScene, String> {
     let document: SceneDocument =
-        serde_json::from_str(json).map_err(|error| format!("invalid scene JSON: {error}"))?;
+        serde_json::from_value(value).map_err(|error| format!("invalid scene JSON: {error}"))?;
     if document.format != "tabletop.scene" || document.format_version != 1 {
         return Err("scene must use tabletop.scene/v1".to_owned());
     }
@@ -431,10 +487,38 @@ fn parse_chinese_eight_ball_scene(json: &str) -> Result<ChineseEightBallScene, S
         return Err("scene canvas dimensions must be positive".to_owned());
     }
 
+    let mut table_count = 0;
     let mut boundary = None;
     let mut holes = Vec::new();
     for element in document.elements {
         match element {
+            SceneElement::Image {
+                name,
+                role,
+                visible,
+                rotation,
+                x,
+                y,
+                width,
+                height,
+                source,
+            } if name == "table" => {
+                table_count += 1;
+                if role == "collision"
+                    || !visible
+                    || rotation != 0.0
+                    || x != 0.0
+                    || y != 0.0
+                    || width != document.canvas.width
+                    || height != document.canvas.height
+                    || !source.starts_with("./")
+                {
+                    return Err(
+                        "table must be a visible, unrotated canvas-sized image with a relative source"
+                            .to_owned(),
+                    );
+                }
+            }
             SceneElement::Polyline {
                 name,
                 role,
@@ -473,6 +557,11 @@ fn parse_chinese_eight_ball_scene(json: &str) -> Result<ChineseEightBallScene, S
             }
             _ => {}
         }
+    }
+    if table_count != 1 {
+        return Err(format!(
+            "scene must contain exactly one image named table, found {table_count}"
+        ));
     }
     let boundary =
         boundary.ok_or_else(|| "scene is missing the boundary collision polyline".to_owned())?;
@@ -620,19 +709,15 @@ fn create_chinese_eight_ball_geometry(
             }
         })
         .collect::<Vec<_>>();
-    let mut table = build_table_spec(
+    let table = build_table_spec(
         BilliardsMode::ChineseEightBall,
         parameters,
         &linear_cushions,
         &circular_cushions,
         &pockets,
     );
-    let left_margin = scene.calibration.left * scale_x;
-    let right_margin = (scene.canvas_width - scene.calibration.right) * scale_x;
-    let top_margin = scene.calibration.top * scale_y;
-    let bottom_margin = (scene.canvas_height - scene.calibration.bottom) * scale_y;
-    table.outer_width = parameters.l + 2.0 * left_margin.max(right_margin);
-    table.outer_height = parameters.w + 2.0 * top_margin.max(bottom_margin);
+    debug_assert!((scene.canvas_width * scale_x - parameters.outer_l).abs() <= EPSILON);
+    debug_assert!((scene.canvas_height * scale_y - parameters.outer_w).abs() <= EPSILON);
     TableGeometry {
         table,
         linear_cushions,
@@ -1084,8 +1169,8 @@ mod tests {
         let chinese = table_spec(BilliardsMode::ChineseEightBall);
         close(chinese.width, 2.540);
         close(chinese.height, 1.270);
-        close(chinese.outer_width, 2.913_437_691_835_482_3);
-        close(chinese.outer_height, 1.670_676_056_338_027_8);
+        close(chinese.outer_width, 2.830);
+        close(chinese.outer_height, 1.550);
         close(chinese.ball_diameter, 0.057_15);
         close(chinese.pockets[0].x, 0.0);
         close(chinese.pockets[0].y, 0.0);
@@ -1122,15 +1207,15 @@ mod tests {
     }
 
     #[test]
-    fn bundled_chinese_scene_has_the_expected_collision_contract() {
-        let scene = parse_chinese_eight_ball_scene(CHINESE_EIGHT_BALL_SCENE_JSON).unwrap();
+    fn dynamic_chinese_scene_has_the_expected_collision_contract() {
+        let scene = load_test_chinese_eight_ball_scene();
         assert_eq!(scene.boundary.len(), 41);
         assert_eq!(scene.holes.len(), 6);
-        close(scene.canvas_width, 1280.0);
-        close(scene.canvas_height, 720.0);
-        close(scene.calibration.left, 79.141_630_901_287_5);
-        close(scene.calibration.right, 1_197.768_240_343_347_5);
-        close(scene.calibration.top, 86.523_605_150_214_51);
-        close(scene.calibration.bottom, 635.021_459_227_467_7);
+        close(scene.canvas_width, 2_830.0);
+        close(scene.canvas_height, 1_550.0);
+        close(scene.calibration.left, 145.0);
+        close(scene.calibration.right, 2_685.0);
+        close(scene.calibration.top, 140.0);
+        close(scene.calibration.bottom, 1_410.0);
     }
 }

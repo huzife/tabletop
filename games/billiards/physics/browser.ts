@@ -1,5 +1,6 @@
 import {
   bindBilliardsCore,
+  configureBilliardsTableSceneWithCore,
   getBilliardsCoreInfoWithCore,
   getBilliardsTableSpecWithCore,
   predictBilliardsTrajectoryWithCore,
@@ -15,6 +16,7 @@ import type {
 } from "./types.js";
 import type { BilliardsMode } from "../shared/settings.js";
 import type { BilliardsTableSpec } from "../shared/table.js";
+import { loadBrowserBilliardsTableScenes } from "./scene-browser.js";
 
 export * from "./types.js";
 
@@ -31,13 +33,20 @@ function getBilliardsCore(): Promise<BilliardsCore> {
 }
 
 async function instantiateBilliardsCore(): Promise<BilliardsCore> {
-  const response = await fetch(CORE_WASM_URL);
+  const [response, scenes] = await Promise.all([
+    fetch(CORE_WASM_URL),
+    loadBrowserBilliardsTableScenes(),
+  ]);
   if (!response.ok) {
     throw new Error(`Unable to fetch the billiards WASM core (${response.status})`);
   }
   const bytes = await response.arrayBuffer();
   const { instance } = await WebAssembly.instantiate(bytes, {});
-  return bindBilliardsCore(instance.exports);
+  const core = bindBilliardsCore(instance.exports);
+  for (const [mode, scene] of scenes) {
+    configureBilliardsTableSceneWithCore(core, mode, scene.document);
+  }
+  return core;
 }
 
 /** Starts loading and compiling the browser WASM instance. */

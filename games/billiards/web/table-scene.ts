@@ -1,120 +1,58 @@
-import {
-  fetchSceneDocument,
-  resolveSceneAssetSource,
-  type ImageElement,
-  type PolylineElement,
-  type SceneDocument,
-} from "@tabletop/scene";
+import type { ImageElement } from "@tabletop/scene";
 
+import { billiardsSceneAsset } from "../physics/scene-assets.js";
+import { loadBrowserBilliardsTableScene } from "../physics/scene-browser.js";
+import {
+  deriveBilliardsSceneCalibration,
+  type BilliardsSceneCalibration,
+  type BilliardsTableScene,
+} from "../shared/scene.js";
+import type { BilliardsMode } from "../shared/settings.js";
 import type { TableGeometry } from "./canvas.js";
 
-const CHINESE_EIGHT_BALL_SCENE_URL = new URL(
-  "./assets/chinese-eight-ball-table.json",
-  import.meta.url,
-);
-const CHINESE_EIGHT_BALL_IMAGE_URL = new URL(
-  "./assets/chinese-eight-ball-table-top-view.png",
-  import.meta.url,
-);
-const CHINESE_EIGHT_BALL_IMAGE_SOURCE = "./chinese-eight-ball-table-top-view.png";
-
-export interface TableSceneCalibration {
-  readonly bottom: number;
-  readonly left: number;
-  readonly right: number;
-  readonly top: number;
-}
-
-export interface LoadedChineseEightBallScene {
-  readonly calibration: TableSceneCalibration;
-  readonly document: SceneDocument;
+export interface LoadedBilliardsTableScene {
+  readonly calibration: BilliardsSceneCalibration;
   readonly image: HTMLImageElement;
-  readonly imageElement: ImageElement;
+  readonly scene: BilliardsTableScene;
 }
 
-let scenePromise: Promise<LoadedChineseEightBallScene> | undefined;
+const scenePromises = new Map<BilliardsMode, Promise<LoadedBilliardsTableScene>>();
 
-export function loadChineseEightBallScene(): Promise<LoadedChineseEightBallScene> {
-  scenePromise ??= fetchSceneDocument(CHINESE_EIGHT_BALL_SCENE_URL)
-    .then(async (document) => {
-      const imageElement = document.elements.find(
-        (element): element is ImageElement =>
-          element.type === "image" && element.visible && element.role !== "collision",
-      );
-      if (imageElement === undefined) {
-        throw new Error("中八场景缺少可见的图片元素");
+export function loadBilliardsTableScene(
+  mode: BilliardsMode,
+): Promise<LoadedBilliardsTableScene | undefined> {
+  const asset = billiardsSceneAsset(mode);
+  if (asset === undefined) return Promise.resolve(undefined);
+
+  const cached = scenePromises.get(mode);
+  if (cached !== undefined) return cached;
+
+  const pending = loadBrowserBilliardsTableScene(mode)
+    .then(async (scene) => {
+      if (scene === undefined) {
+        throw new Error(`${mode} 缺少已登记的球桌场景`);
       }
-      if (!imageElement.source.startsWith("./")) {
-        throw new Error("中八场景图片必须使用相对于场景描述文件的地址");
-      }
-      const imageUrl =
-        imageElement.source === CHINESE_EIGHT_BALL_IMAGE_SOURCE
-          ? CHINESE_EIGHT_BALL_IMAGE_URL
-          : resolveSceneAssetSource(imageElement.source, CHINESE_EIGHT_BALL_SCENE_URL);
       return {
-        calibration: deriveTableSceneCalibration(document),
-        document,
-        image: await loadImage(imageUrl),
-        imageElement,
+        calibration: deriveBilliardsSceneCalibration(scene),
+        image: await loadImage(asset.tableImageUrl, mode),
+        scene,
       };
     })
     .catch((error: unknown) => {
-      scenePromise = undefined;
+      scenePromises.delete(mode);
       throw error;
     });
-  return scenePromise;
+  scenePromises.set(mode, pending);
+  return pending;
 }
 
-export function deriveTableSceneCalibration(document: SceneDocument): TableSceneCalibration {
-  const boundary = document.elements.find(
-    (element): element is PolylineElement =>
-      element.type === "polyline" &&
-      element.name === "boundary" &&
-      element.role !== "visual" &&
-      element.closed,
-  );
-  if (boundary === undefined) {
-    throw new Error("中八场景缺少闭合的 boundary 碰撞多边形");
-  }
-
-  const horizontalLevels: number[] = [];
-  const verticalExtents: number[] = [];
-  for (const [index, first] of boundary.points.entries()) {
-    const second = boundary.points[(index + 1) % boundary.points.length];
-    if (second === undefined) continue;
-    const dx = second.x - first.x;
-    const dy = second.y - first.y;
-    if (Math.abs(dy) <= 1e-9 && Math.abs(dx) >= document.canvas.width * 0.25) {
-      horizontalLevels.push(first.y);
-    }
-    if (
-      Math.abs(dx) <= document.canvas.width * 0.01 &&
-      Math.abs(dy) >= document.canvas.height * 0.25
-    ) {
-      verticalExtents.push(first.x, second.x);
-    }
-  }
-  if (horizontalLevels.length < 2 || verticalExtents.length < 4) {
-    throw new Error("中八 boundary 缺少用于坐标标定的长直边");
-  }
-  const calibration = {
-    bottom: Math.max(...horizontalLevels),
-    left: Math.min(...verticalExtents),
-    right: Math.max(...verticalExtents),
-    top: Math.min(...horizontalLevels),
-  };
-  if (calibration.right <= calibration.left || calibration.bottom <= calibration.top) {
-    throw new Error("中八 boundary 的坐标标定范围无效");
-  }
-  return calibration;
-}
-
-export function drawChineseEightBallScene(
+export function drawBilliardsTableScene(
   context: CanvasRenderingContext2D,
   geometry: TableGeometry,
-  scene: LoadedChineseEightBallScene,
+  loaded: LoadedBilliardsTableScene,
 ): boolean {
-  const { calibration, image, imageElement } = scene;
+  const { calibration, image, scene } = loaded;
+  const imageElement = scene.table;
   const scaleX = geometry.playWidth / (calibration.right - calibration.left);
   const scaleY = geometry.playHeight / (calibration.bottom - calibration.top);
 
@@ -130,13 +68,13 @@ export function drawChineseEightBallScene(
   return true;
 }
 
-function loadImage(source: string | URL): Promise<HTMLImageElement> {
+function loadImage(source: string | URL, mode: BilliardsMode): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.addEventListener("load", () => resolve(image), { once: true });
     image.addEventListener(
       "error",
-      () => reject(new Error(`无法加载中八球桌图片：${String(source)}`)),
+      () => reject(new Error(`无法加载 ${mode} 球桌图片：${String(source)}`)),
       { once: true },
     );
     image.src = String(source);

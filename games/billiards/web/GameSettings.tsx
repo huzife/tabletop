@@ -19,27 +19,11 @@ const MODES: readonly {
   },
 ];
 
-const DIAGRAMS: Readonly<
-  Record<BilliardsMode, { readonly alt: string; readonly caption: string; readonly src: string }>
-> = {
-  "chinese-eight-ball": {
-    alt: "中式八球球桌、球洞和球尺寸示意图",
-    caption: "中式八球：2540 × 1270 mm 有效比赛区，57.15 mm 球径",
-    src: new URL("./assets/chinese-eight-ball-dimensions.png", import.meta.url).href,
-  },
-  snooker: {
-    alt: "斯诺克球桌、球洞、D 区和球尺寸示意图",
-    caption: "斯诺克：3569 × 1778 mm 有效比赛区，52.5 mm 球径",
-    src: new URL("./assets/snooker-table-dimensions.png", import.meta.url).href,
-  },
-};
-
 export function BilliardsSettingsEditor({
   disabled,
   onChange,
   value,
 }: GameSettingsPropsV1<BilliardsSettings>) {
-  const diagram = DIAGRAMS[value.mode];
   return (
     <div className="billiards-settings">
       <fieldset className="billiards-settings__group" disabled={disabled}>
@@ -69,12 +53,6 @@ export function BilliardsSettingsEditor({
           ))}
         </div>
       </fieldset>
-      <figure className="billiards-settings__diagram">
-        <a href={diagram.src} rel="noreferrer" target="_blank">
-          <img alt={diagram.alt} loading="lazy" src={diagram.src} />
-        </a>
-        <figcaption>{diagram.caption} · 点击查看原图</figcaption>
-      </figure>
     </div>
   );
 }

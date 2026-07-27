@@ -147,6 +147,8 @@ export function drawBilliardsTable(
     ) => boolean;
     readonly placementPoint?: TablePoint;
     readonly placementValid?: boolean;
+    readonly requiredTableBackground?: boolean;
+    readonly tableBackgroundMessage?: string;
   },
 ): void {
   const { playLeft, scale } = geometry;
@@ -155,6 +157,14 @@ export function drawBilliardsTable(
   context.fillRect(0, 0, geometry.width, geometry.height);
 
   const sceneBackgroundDrawn = options.drawTableBackground?.(context, geometry) === true;
+  if (!sceneBackgroundDrawn && options.requiredTableBackground === true) {
+    drawTableBackgroundMessage(
+      context,
+      geometry,
+      options.tableBackgroundMessage ?? "球桌场景加载中…",
+    );
+    return;
+  }
 
   const radius = (table.ballDiameter * scale) / 2;
   if (!sceneBackgroundDrawn) {
@@ -192,6 +202,20 @@ export function drawBilliardsTable(
   if (cueBall !== undefined && options.aimEnabled) {
     drawAim(context, cueBall, balls, geometry, angle, elevation, tip, mode, table.ballDiameter);
   }
+}
+
+function drawTableBackgroundMessage(
+  context: CanvasRenderingContext2D,
+  geometry: TableGeometry,
+  message: string,
+): void {
+  context.save();
+  context.fillStyle = "#58635d";
+  context.font = "600 14px system-ui, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(message, geometry.width / 2, geometry.height / 2);
+  context.restore();
 }
 
 function drawOuterTable(

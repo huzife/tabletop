@@ -8,6 +8,7 @@ import type {
 } from "@tabletop/game-sdk/web";
 
 import { simulateBilliardsShot } from "../physics/browser.js";
+import { billiardsSceneAsset } from "../physics/scene-assets.js";
 import type {
   BilliardsAction,
   BilliardsBreakChoice,
@@ -42,9 +43,9 @@ import {
   type TablePoint,
 } from "./canvas.js";
 import {
-  drawChineseEightBallScene,
-  loadChineseEightBallScene,
-  type LoadedChineseEightBallScene,
+  drawBilliardsTableScene,
+  loadBilliardsTableScene,
+  type LoadedBilliardsTableScene,
 } from "./table-scene.js";
 
 const SNOOKER_COLORS: readonly { readonly label: string; readonly value: SnookerColor }[] = [
@@ -127,6 +128,17 @@ type RawPlaybackFrame = {
   readonly atMs: number;
   readonly balls: readonly RawPlaybackBall[];
 };
+
+type TableSceneLoadState =
+  | {
+      readonly mode: BilliardsMode;
+      readonly status: "error" | "loading";
+    }
+  | {
+      readonly mode: BilliardsMode;
+      readonly scene: LoadedBilliardsTableScene;
+      readonly status: "ready";
+    };
 
 export function BilliardsGameView({
   actionPending,
@@ -469,8 +481,13 @@ function BilliardsCanvas({
     typeof window === "undefined" ? 1 : Math.max(1, window.devicePixelRatio || 1),
   );
   const [hoverPoint, setHoverPoint] = useState<TablePoint | undefined>();
-  const [tableScene, setTableScene] = useState<LoadedChineseEightBallScene | undefined>();
+  const [tableSceneState, setTableSceneState] = useState<TableSceneLoadState | undefined>();
   const pointerRef = useRef<{ id: number; mode: "aim" | "place" } | null>(null);
+  const sceneRequired = billiardsSceneAsset(mode) !== undefined;
+  const activeSceneState = tableSceneState?.mode === mode ? tableSceneState : undefined;
+  const tableScene = activeSceneState?.status === "ready" ? activeSceneState.scene : undefined;
+  const tableSceneReady = !sceneRequired || tableScene !== undefined;
+  const canvasInteractive = tableSceneReady && (aimEnabled || placementEnabled);
   const geometry = useMemo(
     () => tableGeometry(size.width, size.height, table),
     [size.height, size.width, table],
@@ -480,22 +497,28 @@ function BilliardsCanvas({
     hoverPoint === undefined ? false : isCuePlacementValid(hoverPoint, view, cueRadius);
 
   useEffect(() => {
-    if (mode !== "chinese-eight-ball") {
-      setTableScene(undefined);
+    if (!sceneRequired) {
+      setTableSceneState(undefined);
       return undefined;
     }
     let active = true;
-    void loadChineseEightBallScene()
+    setTableSceneState({ mode, status: "loading" });
+    void loadBilliardsTableScene(mode)
       .then((scene) => {
-        if (active) setTableScene(scene);
+        if (!active) return;
+        if (scene === undefined) {
+          setTableSceneState({ mode, status: "error" });
+          return;
+        }
+        setTableSceneState({ mode, scene, status: "ready" });
       })
       .catch(() => {
-        // Keep the procedural table as a resilient fallback if an asset cannot be loaded.
+        if (active) setTableSceneState({ mode, status: "error" });
       });
     return () => {
       active = false;
     };
-  }, [mode]);
+  }, [mode, sceneRequired]);
 
   useEffect(() => {
     if (!placementEnabled) {
@@ -557,6 +580,9 @@ function BilliardsCanvas({
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawBilliardsTable(context, geometry, table, mode, balls, aimAngle, elevation, tip, {
       aimEnabled: aimVisible,
+      requiredTableBackground: sceneRequired,
+      tableBackgroundMessage:
+        activeSceneState?.status === "error" ? "球桌场景加载失败，请刷新重试" : "球桌场景加载中…",
       placementValid,
       ...(tableScene === undefined
         ? {}
@@ -564,7 +590,7 @@ function BilliardsCanvas({
             drawTableBackground: (
               drawContext: CanvasRenderingContext2D,
               drawGeometry: typeof geometry,
-            ) => drawChineseEightBallScene(drawContext, drawGeometry, tableScene),
+            ) => drawBilliardsTableScene(drawContext, drawGeometry, tableScene),
           }),
       ...(placementEnabled && hoverPoint !== undefined ? { placementPoint: hoverPoint } : {}),
     });
@@ -580,8 +606,10 @@ function BilliardsCanvas({
     placementEnabled,
     placementValid,
     pixelRatio,
+    sceneRequired,
     size,
     table,
+    activeSceneState?.status,
     tableScene,
     tip,
   ]);
@@ -592,6 +620,7 @@ function BilliardsCanvas({
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!canvasInteractive) return;
     const point = pointAt(event);
     if (placementEnabled) setHoverPoint(point);
     if (pointerRef.current?.mode === "aim") {
@@ -601,7 +630,7 @@ function BilliardsCanvas({
   };
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if ((!aimEnabled && !placementEnabled) || event.button !== 0) return;
+    if (!canvasInteractive || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const modeForPointer = placementEnabled ? "place" : "aim";
     pointerRef.current = { id: event.pointerId, mode: modeForPointer };
@@ -635,7 +664,7 @@ function BilliardsCanvas({
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
-    if (!aimEnabled && !placementEnabled) return;
+    if (!canvasInteractive) return;
     if (aimEnabled && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
       event.preventDefault();
       onAimAngleChange(aimAngle + (event.key === "ArrowLeft" ? -Math.PI / 36 : Math.PI / 36));
@@ -668,23 +697,25 @@ function BilliardsCanvas({
     <div className="billiards-table-frame">
       <canvas
         aria-label={
-          placementEnabled
-            ? "台球桌，使用方向键选择母球位置，按回车确认"
-            : aimEnabled
-              ? "台球桌，使用左右方向键调整瞄准方向"
-              : "台球桌"
+          !tableSceneReady
+            ? activeSceneState?.status === "error"
+              ? "台球桌场景加载失败"
+              : "台球桌场景加载中"
+            : placementEnabled
+              ? "台球桌，使用方向键选择母球位置，按回车确认"
+              : aimEnabled
+                ? "台球桌，使用左右方向键调整瞄准方向"
+                : "台球桌"
         }
-        className={
-          aimEnabled || placementEnabled ? "billiards-canvas is-interactive" : "billiards-canvas"
-        }
+        className={canvasInteractive ? "billiards-canvas is-interactive" : "billiards-canvas"}
         onKeyDown={handleKeyDown}
         onPointerCancel={cancelPointer}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={releasePointer}
         ref={canvasRef}
-        role={aimEnabled || placementEnabled ? "application" : "img"}
-        tabIndex={aimEnabled || placementEnabled ? 0 : -1}
+        role={canvasInteractive ? "application" : "img"}
+        tabIndex={canvasInteractive ? 0 : -1}
       />
       {showOutcome && view.outcome !== null ? (
         <div aria-hidden="true" className="billiards-outcome">

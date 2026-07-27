@@ -1,5 +1,6 @@
 import { defineGameWebModuleV1 } from "@tabletop/game-sdk/web";
 
+import { initializeBilliardsPhysics } from "../physics/browser.js";
 import { billiardsShared } from "../shared/contract.js";
 import { BilliardsGameView } from "./GameView.js";
 import { BilliardsSettingsEditor } from "./GameSettings.js";
@@ -27,6 +28,12 @@ const RULE_ERRORS: Readonly<Record<string, string>> = {
   RESIGN_NOT_ALLOWED: "当前不能认输",
   SHOT_IN_PROGRESS: "正在结算上一杆",
 };
+
+if (typeof window !== "undefined") {
+  void initializeBilliardsPhysics().catch(() => {
+    // The shared loader clears its cache after a failure so the game view can retry.
+  });
+}
 
 export const billiardsWebModule = defineGameWebModuleV1({
   shared: billiardsShared,

@@ -1,7 +1,7 @@
 use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v3";
+pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v4";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BilliardsMode {

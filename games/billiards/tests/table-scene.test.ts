@@ -1,38 +1,95 @@
 import { readFileSync } from "node:fs";
 
-import { parseSceneJson } from "@tabletop/scene";
 import { describe, expect, it } from "vitest";
 
-import { deriveTableSceneCalibration } from "../web/table-scene.js";
+import {
+  deriveBilliardsSceneCalibration,
+  parseBilliardsTableScene,
+  type BilliardsSceneCalibration,
+} from "../shared/scene.js";
 
-const scene = parseSceneJson(
-  readFileSync(new URL("../web/assets/chinese-eight-ball-table.json", import.meta.url), "utf8"),
-);
+const sceneUrl = new URL("../scenes/chinese-eight-ball/table.json", import.meta.url);
+const input = JSON.parse(readFileSync(sceneUrl, "utf8")) as unknown;
+const scene = parseBilliardsTableScene("chinese-eight-ball", input);
 
 describe("Chinese eight-ball scene asset", () => {
-  it("keeps its image portable and publishes one boundary with six holes", () => {
-    const image = scene.elements.find((element) => element.type === "image");
-    const boundaries = scene.elements.filter(
-      (element) => element.type === "polyline" && element.name === "boundary",
+  it("uses the fixed table, boundary and hole names with a portable image", () => {
+    expect(scene.table).toMatchObject({
+      height: 1550,
+      name: "table",
+      role: "visual",
+      source: "./table.png",
+      type: "image",
+      width: 2830,
+      x: 0,
+      y: 0,
+    });
+    expect(readFileSync(new URL(scene.table.source, sceneUrl)).subarray(1, 4).toString()).toBe(
+      "PNG",
     );
-    const holes = scene.elements.filter(
-      (element) => element.type === "ellipse" && element.name === "hole",
+    expect(scene.boundary).toMatchObject({
+      closed: true,
+      name: "boundary",
+      role: "collision",
+      type: "polyline",
+    });
+    expect(scene.boundary.points).toHaveLength(41);
+    expect(scene.holes).toHaveLength(6);
+    expect(scene.holes.every((hole) => hole.name === "hole" && hole.role === "collision")).toBe(
+      true,
     );
-
-    expect(image?.source).toBe("./chinese-eight-ball-table-top-view.png");
-    expect(boundaries).toHaveLength(1);
-    expect(boundaries[0]).toMatchObject({ closed: true, role: "collision" });
-    expect(boundaries[0]?.type === "polyline" ? boundaries[0].points : []).toHaveLength(41);
-    expect(holes).toHaveLength(6);
-    expect(holes.every((hole) => hole.role === "collision")).toBe(true);
   });
 
-  it("derives the same playfield anchors used by native physics", () => {
-    expect(deriveTableSceneCalibration(scene)).toEqual({
-      bottom: 635.0214592274677,
-      left: 79.1416309012875,
-      right: 1197.7682403433475,
-      top: 86.52360515021451,
-    });
+  it("uses millimetre scene units for the official outer and playing dimensions", () => {
+    const calibration = deriveBilliardsSceneCalibration(scene);
+
+    expect(scene.document.canvas).toMatchObject({ height: 1550, width: 2830 });
+    expect(calibration).toEqual({
+      bottom: 1410,
+      left: 145,
+      right: 2685,
+      top: 140,
+    } satisfies BilliardsSceneCalibration);
+    expect(calibration.right - calibration.left).toBe(2540);
+    expect(calibration.bottom - calibration.top).toBe(1270);
+    expect(scene.document.canvas.width / (calibration.right - calibration.left)).toBeCloseTo(
+      2.83 / 2.54,
+      12,
+    );
+    expect(scene.document.canvas.height / (calibration.bottom - calibration.top)).toBeCloseTo(
+      1.55 / 1.27,
+      12,
+    );
+    expect(57.15 / (calibration.right - calibration.left)).toBeCloseTo(0.05715 / 2.54, 12);
+  });
+
+  it("rejects a reserved element with the wrong fixed name", () => {
+    const malformed = structuredClone(input) as {
+      elements: Array<{ name: string; type: string }>;
+    };
+    const table = malformed.elements.find((element) => element.type === "image");
+    if (table === undefined) throw new Error("test scene is missing its table image");
+    table.name = "background";
+
+    expect(() => parseBilliardsTableScene("chinese-eight-ball", malformed)).toThrow(
+      "名为 table 的图片元素",
+    );
+  });
+
+  it("rejects a scene that changes the authoritative table scale", () => {
+    const malformed = structuredClone(input) as {
+      canvas: { width: number };
+      elements: Array<{ name: string; type: string; width?: number }>;
+    };
+    malformed.canvas.width = 2831;
+    const table = malformed.elements.find(
+      (element) => element.type === "image" && element.name === "table",
+    );
+    if (table === undefined) throw new Error("test scene is missing its table image");
+    table.width = 2831;
+
+    expect(() => parseBilliardsTableScene("chinese-eight-ball", malformed)).toThrow(
+      "2830 × 1550 mm",
+    );
   });
 });

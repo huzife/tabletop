@@ -46,7 +46,7 @@ games/<game-id>/
 └── tests/
 ```
 
-`shared` 只能放浏览器可以安全获得的内容；完整权威状态定义放在 `server`。大型素材放在游戏自己的 `web/assets`，经 Vite 构建并使用内容哈希缓存。
+`shared` 只能放浏览器可以安全获得的内容；完整权威状态定义放在 `server`。大型素材放在游戏自己的可发布资源目录中（例如 `web/assets`，或与描述文件同目录的 `scenes/<mode>`），经构建流程复制或由 Vite 使用内容哈希发布。
 
 需要共同设计视觉元素和碰撞几何时，可以使用仓库的
 [2D 场景与碰撞区编辑器](scene-editor.md)导出 `tabletop.scene/v1` 描述文件，

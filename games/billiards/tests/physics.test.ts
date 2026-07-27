@@ -43,8 +43,8 @@ describe("Pooltool-compatible billiards core", () => {
       ballDiameter: 0.05715,
       ballMass: 0.170097,
       height: 1.27,
-      outerHeight: 1.6706760563380278,
-      outerWidth: 2.9134376918354823,
+      outerHeight: 1.55,
+      outerWidth: 2.83,
       width: 2.54,
     });
     expect(pool.pockets.map(({ mouthWidth }) => mouthWidth)).toEqual([
@@ -56,12 +56,9 @@ describe("Pooltool-compatible billiards core", () => {
     expect(pool.pockets[0]).toMatchObject({ x: 0, y: 0 });
     expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.02075736648250448, 12);
     expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.03468153364632253, 12);
-    expect(pool.pockets[1]).toMatchObject({
-      captureX: 1.2718515960712096,
-      captureY: -0.05555007824726151,
-      x: 2.54 / 2,
-      y: 0,
-    });
+    expect(pool.pockets[1]).toMatchObject({ x: 2.54 / 2, y: 0 });
+    expect(pool.pockets[1]?.captureX).toBeCloseTo(1.2718515960712096, 12);
+    expect(pool.pockets[1]?.captureY).toBeCloseTo(-0.05555007824726151, 12);
 
     const snooker = getBilliardsTableSpec("snooker");
     expect(snooker).toMatchObject({
@@ -108,7 +105,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v3");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v4");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
