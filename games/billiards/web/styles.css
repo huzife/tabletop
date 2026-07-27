@@ -626,6 +626,55 @@
   opacity: 0.54;
 }
 
+.billiards-settings__physics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.billiards-settings__parameter {
+  background: #ffffff;
+  border: 1px solid #d8ded9;
+  border-radius: 6px;
+  display: grid;
+  gap: 7px;
+  padding: 10px 12px;
+}
+
+.billiards-settings__parameter > span {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.billiards-settings__parameter strong {
+  color: #202522;
+  font-size: 12px;
+}
+
+.billiards-settings__parameter output {
+  color: #17694e;
+  font:
+    700 12px/1 ui-monospace,
+    monospace;
+}
+
+.billiards-settings__parameter input {
+  accent-color: #23815f;
+  margin: 0;
+  width: 100%;
+}
+
+.billiards-settings__parameter small {
+  color: #68716c;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.billiards-settings__group:disabled .billiards-settings__parameter {
+  opacity: 0.54;
+}
+
 @keyframes billiards-spin {
   to {
     transform: rotate(360deg);
@@ -766,7 +815,8 @@
     grid-template-columns: minmax(0, 1fr) 92px;
   }
 
-  .billiards-settings__modes {
+  .billiards-settings__modes,
+  .billiards-settings__physics {
     grid-template-columns: minmax(0, 1fr);
   }
 }

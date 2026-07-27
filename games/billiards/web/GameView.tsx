@@ -1019,6 +1019,8 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
           const result = (await simulateBilliardsShot({
             balls: event.initialBalls,
             captureFrames: true,
+            clothRollingFriction: event.clothRollingFriction,
+            clothSlidingFriction: event.clothSlidingFriction,
             mode: event.mode,
             shot: event.shot,
           })) as {

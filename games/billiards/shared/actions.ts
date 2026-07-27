@@ -3,16 +3,22 @@ import { z } from "zod";
 export const snookerColorSchema = z.enum(["yellow", "green", "brown", "blue", "pink", "black"]);
 export type SnookerColor = z.infer<typeof snookerColorSchema>;
 
+const CUE_TIP_RADIUS = 0.95;
+const CUE_TIP_ROUNDING_TOLERANCE = 1e-12;
+
 // Shooter-view cue-ball face: X is left-negative/right-positive and Y is
 // bottom-negative/top-positive.
 export const cueTipSchema = z
   .strictObject({
-    x: z.number().finite().min(-0.95).max(0.95),
-    y: z.number().finite().min(-0.95).max(0.95),
+    x: z.number().finite().min(-CUE_TIP_RADIUS).max(CUE_TIP_RADIUS),
+    y: z.number().finite().min(-CUE_TIP_RADIUS).max(CUE_TIP_RADIUS),
   })
-  .refine(({ x, y }) => x * x + y * y <= 0.95 * 0.95, {
-    message: "cue tip offset must stay inside the cue-ball face",
-  });
+  .refine(
+    ({ x, y }) => x * x + y * y <= CUE_TIP_RADIUS * CUE_TIP_RADIUS + CUE_TIP_ROUNDING_TOLERANCE,
+    {
+      message: "cue tip offset must stay inside the cue-ball face",
+    },
+  );
 export type CueTip = z.infer<typeof cueTipSchema>;
 
 export const billiardsShotSchema = z.strictObject({

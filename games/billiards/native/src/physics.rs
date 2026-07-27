@@ -2,10 +2,12 @@ use crate::api::CoreError;
 use crate::geometry::{Aabb, CircularCushion, CushionDirection, LinearCushion, TableGeometry};
 use crate::math::{EPSILON, Vec2, Vec3, clamp, normalize_rotation, quantize, roots_in_interval};
 use crate::model::{
-    Ball, BallKind, BallParameters, BilliardsMode, CueStrikeDiagnostics, DynamicBall, MotionState,
-    PHYSICS_VERSION, PredictShotInput, PredictedBallPath, PredictedPathPoint, Shot,
-    ShotSimulationResult, SimulateShotInput, SimulationBallFrame, SimulationEvent, SimulationFrame,
-    TableSpec, TrajectoryPrediction,
+    Ball, BallKind, BallParameters, BilliardsMode, CueStrikeDiagnostics,
+    DEFAULT_CLOTH_ROLLING_FRICTION, DEFAULT_CLOTH_SLIDING_FRICTION, DynamicBall,
+    MAX_CLOTH_ROLLING_FRICTION, MAX_CLOTH_SLIDING_FRICTION, MIN_CLOTH_ROLLING_FRICTION,
+    MIN_CLOTH_SLIDING_FRICTION, MotionState, PHYSICS_VERSION, PredictShotInput, PredictedBallPath,
+    PredictedPathPoint, Shot, ShotSimulationResult, SimulateShotInput, SimulationBallFrame,
+    SimulationEvent, SimulationFrame, TableSpec, TrajectoryPrediction,
 };
 use crate::replay::{legacy_checksum, state_hash};
 use crate::stronge;
@@ -20,6 +22,7 @@ const EVENT_QUANTUM: f64 = 1.0e-10;
 const ROOT_HORIZON_PAD: f64 = 1.0e-10;
 const CUE_SPEED_AT_HALF_POWER: f64 = 2.0;
 const CUSHION_OMEGA_RATIO: f64 = 1.8;
+const CUE_TIP_ROUNDING_TOLERANCE: f64 = 1.0e-12;
 
 #[derive(Clone, Copy, Debug)]
 struct CueParameters {
@@ -49,15 +52,33 @@ impl CueParameters {
 }
 
 pub fn ball_parameters(mode: BilliardsMode) -> BallParameters {
-    let (mass, radius, sliding_friction, cushion_friction) = match mode {
-        BilliardsMode::ChineseEightBall => (0.170_097, 0.028_575, 0.2, 0.2),
-        BilliardsMode::Snooker => (0.140, 0.026_193_75, 0.5, 0.5),
+    ball_parameters_with_cloth(
+        mode,
+        DEFAULT_CLOTH_SLIDING_FRICTION,
+        DEFAULT_CLOTH_ROLLING_FRICTION,
+    )
+}
+
+fn ball_parameters_with_cloth(
+    mode: BilliardsMode,
+    cloth_sliding_friction: f64,
+    cloth_rolling_friction: f64,
+) -> BallParameters {
+    let (mass, radius, sliding_friction, rolling_friction, cushion_friction) = match mode {
+        BilliardsMode::ChineseEightBall => (
+            0.170_097,
+            0.028_575 * 1.4,
+            cloth_sliding_friction,
+            cloth_rolling_friction,
+            0.2,
+        ),
+        BilliardsMode::Snooker => (0.140, 0.026_193_75, 0.5, 0.01, 0.5),
     };
     BallParameters {
         mass,
         radius,
         sliding_friction,
-        rolling_friction: 0.01,
+        rolling_friction,
         spinning_friction: (4.0 / 9.0) * radius,
         ball_restitution: 0.95,
         table_restitution: 0.5,
@@ -110,6 +131,10 @@ enum EventKind {
         ball: usize,
         cushion: usize,
     },
+    BoundaryVertex {
+        ball: usize,
+        vertex: usize,
+    },
     BallBall {
         first: usize,
         second: usize,
@@ -131,6 +156,7 @@ impl CandidateEvent {
             EventKind::Transition { .. } | EventKind::Pocket { .. } => 2,
             EventKind::LinearCushion { .. }
             | EventKind::CircularCushion { .. }
+            | EventKind::BoundaryVertex { .. }
             | EventKind::BallBall { .. }
             | EventKind::BallTable { .. } => 3,
         }
@@ -145,6 +171,7 @@ impl CandidateEvent {
             | EventKind::Pocket { ball, .. }
             | EventKind::LinearCushion { ball, .. }
             | EventKind::CircularCushion { ball, .. }
+            | EventKind::BoundaryVertex { ball, .. }
             | EventKind::BallTable { ball } => ball_energy(&balls[ball], params),
         }
     }
@@ -153,7 +180,11 @@ impl CandidateEvent {
 pub fn simulate_shot(input: SimulateShotInput) -> Result<ShotSimulationResult, CoreError> {
     validate_input(&input)?;
     let geometry = TableGeometry::for_mode(input.mode);
-    let parameters = ball_parameters(input.mode);
+    let parameters = ball_parameters_with_cloth(
+        input.mode,
+        input.cloth_sliding_friction,
+        input.cloth_rolling_friction,
+    );
     let (mut balls, indices_by_id) = dynamic_balls(&input.balls, &geometry.table, parameters);
     let cue_index = balls
         .iter()
@@ -312,6 +343,8 @@ pub fn predict_shot(input: PredictShotInput) -> Result<TrajectoryPrediction, Cor
     let result = simulate_shot(SimulateShotInput {
         balls: input.balls,
         capture_frames: true,
+        cloth_rolling_friction: input.cloth_rolling_friction,
+        cloth_sliding_friction: input.cloth_sliding_friction,
         mode: input.mode,
         shot: input.shot,
     })?;
@@ -386,6 +419,18 @@ fn validate_input(input: &SimulateShotInput) -> Result<(), CoreError> {
             "exactly one cue ball is required",
         ));
     }
+    if !input.cloth_sliding_friction.is_finite()
+        || !(MIN_CLOTH_SLIDING_FRICTION..=MAX_CLOTH_SLIDING_FRICTION)
+            .contains(&input.cloth_sliding_friction)
+        || !input.cloth_rolling_friction.is_finite()
+        || !(MIN_CLOTH_ROLLING_FRICTION..=MAX_CLOTH_ROLLING_FRICTION)
+            .contains(&input.cloth_rolling_friction)
+    {
+        return Err(CoreError::invalid(
+            "CLOTH_FRICTION_OUT_OF_RANGE",
+            "cloth friction is outside the supported calibration range",
+        ));
+    }
     let shot = &input.shot;
     if ![
         shot.angle,
@@ -405,7 +450,8 @@ fn validate_input(input: &SimulateShotInput) -> Result<(), CoreError> {
     if !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&shot.angle)
         || !(0.0..=90.0).contains(&shot.elevation)
         || !(1.0..=100.0).contains(&shot.power)
-        || shot.tip.x * shot.tip.x + shot.tip.y * shot.tip.y > 0.95_f64.powi(2) + EPSILON
+        || shot.tip.x * shot.tip.x + shot.tip.y * shot.tip.y
+            > 0.95_f64.powi(2) + CUE_TIP_ROUNDING_TOLERANCE
     {
         return Err(CoreError::invalid(
             "SHOT_OUT_OF_RANGE",
@@ -626,13 +672,22 @@ fn predict_next_event(
     let horizon = transition.map_or(f64::INFINITY, |candidate| candidate.time) + ROOT_HORIZON_PAD;
     let linear = next_linear_cushion(balls, geometry, params, horizon);
     let circular = next_circular_cushion(balls, geometry, params, horizon);
+    let boundary_vertex = next_boundary_vertex(balls, geometry, params, horizon);
     let pocket = next_pocket(balls, geometry, params, horizon);
     let ball_ball = next_ball_ball(balls, params, horizon);
     let ball_table = next_ball_table(balls, params, horizon);
 
-    let mut candidates = [transition, linear, circular, pocket, ball_ball, ball_table]
-        .into_iter()
-        .flatten();
+    let mut candidates = [
+        transition,
+        linear,
+        circular,
+        boundary_vertex,
+        pocket,
+        ball_ball,
+        ball_table,
+    ]
+    .into_iter()
+    .flatten();
     let mut best = candidates.next()?;
     for candidate in candidates {
         if candidate.time < best.time {
@@ -837,6 +892,63 @@ fn next_circular_cushion(
     best
 }
 
+fn next_boundary_vertex(
+    balls: &[DynamicBall],
+    geometry: &TableGeometry,
+    params: BallParameters,
+    horizon: f64,
+) -> Option<CandidateEvent> {
+    let mut best = None;
+    for (ball_index, ball) in balls.iter().enumerate() {
+        if !ball.active()
+            || matches!(
+                ball.state,
+                MotionState::Stationary | MotionState::Spinning | MotionState::Airborne
+            )
+        {
+            continue;
+        }
+        let motion = kinematics(ball, params);
+        let motion_box = motion_aabb(ball, motion, horizon, params.radius);
+        for (vertex_index, vertex) in geometry.boundary_vertices.iter().enumerate() {
+            let vertex_box = Aabb {
+                minimum: vertex.aabb.minimum - Vec2::new(params.radius, params.radius),
+                maximum: vertex.aabb.maximum + Vec2::new(params.radius, params.radius),
+            };
+            if !motion_box.overlaps(vertex_box) {
+                continue;
+            }
+            let relative = ball.position.xy() - vertex.center.xy();
+            let time = if relative.length_squared() < params.radius * params.radius {
+                Some(0.0)
+            } else {
+                event_root_allow_zero(
+                    &distance_polynomial(
+                        relative,
+                        motion.velocity.xy(),
+                        motion.acceleration.xy(),
+                        params.radius,
+                    ),
+                    horizon,
+                )
+            };
+            if let Some(time) = time {
+                replace_if_earlier(
+                    &mut best,
+                    CandidateEvent {
+                        time,
+                        kind: EventKind::BoundaryVertex {
+                            ball: ball_index,
+                            vertex: vertex_index,
+                        },
+                    },
+                );
+            }
+        }
+    }
+    best
+}
+
 fn next_pocket(
     balls: &[DynamicBall],
     geometry: &TableGeometry,
@@ -854,7 +966,11 @@ fn next_pocket(
             if !motion_box.overlaps(pocket.aabb) {
                 continue;
             }
-            let time = if ball.state == MotionState::Airborne {
+            let inside_capture = (ball.position.xy() - pocket.center.xy()).length_squared()
+                < pocket.radius * pocket.radius;
+            let time = if inside_capture {
+                Some(0.0)
+            } else if ball.state == MotionState::Airborne {
                 airborne_pocket_time(ball, pocket.center.xy(), pocket.radius, params)
             } else {
                 event_root_allow_zero(
@@ -1130,6 +1246,25 @@ fn resolve_event(
             record_rail_contact(
                 ball,
                 &geometry.circular_cushions[cushion].id,
+                current_time,
+                balls,
+                events,
+                rail_contact_ball_ids,
+                rail_contact_set,
+                post_contact_rail_ball_ids,
+                post_contact_rail_set,
+                !first_contact_ball_ids.is_empty(),
+            );
+        }
+        EventKind::BoundaryVertex { ball, vertex } => {
+            resolve_circular_cushion(
+                &mut balls[ball],
+                &geometry.boundary_vertices[vertex],
+                params,
+            );
+            record_rail_contact(
+                ball,
+                &geometry.boundary_vertices[vertex].id,
                 current_time,
                 balls,
                 events,
@@ -1643,9 +1778,9 @@ mod tests {
     fn pooltool_parameter_sets_are_exact() {
         let pool = ball_parameters(BilliardsMode::ChineseEightBall);
         assert_eq!(pool.mass, 0.170_097);
-        assert_eq!(pool.radius, 0.028_575);
-        assert_eq!(pool.sliding_friction, 0.2);
-        assert_eq!(pool.rolling_friction, 0.01);
+        assert_eq!(pool.radius, 0.028_575 * 1.4);
+        assert_eq!(pool.sliding_friction, DEFAULT_CLOTH_SLIDING_FRICTION);
+        assert_eq!(pool.rolling_friction, DEFAULT_CLOTH_ROLLING_FRICTION);
         assert_eq!(pool.spinning_friction, (4.0 / 9.0) * pool.radius);
         assert_eq!(pool.ball_restitution, 0.95);
         assert_eq!(pool.table_restitution, 0.5);
@@ -1673,6 +1808,88 @@ mod tests {
         assert_eq!(snooker_cue.tip_radius, 0.010_604_5);
         assert_eq!(snooker_cue.end_mass, 0.140 / 30.0);
         assert_eq!(CUSHION_OMEGA_RATIO, 1.8);
+    }
+
+    #[test]
+    fn chinese_boundary_vertices_contain_high_power_angle_sweep() {
+        let geometry = TableGeometry::for_mode(BilliardsMode::ChineseEightBall);
+        let starts = [(0.35, 0.3), (1.27, 0.635), (2.2, 0.95)];
+        let tips = [
+            CueTip { x: 0.0, y: 0.0 },
+            CueTip { x: 0.6, y: 0.0 },
+            CueTip { x: -0.6, y: 0.0 },
+            CueTip { x: 0.0, y: 0.6 },
+            CueTip { x: 0.0, y: -0.6 },
+        ];
+        for (x, y) in starts {
+            for tip in tips {
+                for index in 0..144 {
+                    let angle = -std::f64::consts::PI + index as f64 * std::f64::consts::PI / 72.0;
+                    let capture_known_escape =
+                        x == 0.35 && y == 0.3 && tip == (CueTip { x: 0.0, y: 0.0 }) && index == 5;
+                    let result = simulate_shot(SimulateShotInput {
+                        balls: vec![ball("cue", BallKind::Cue, x, y)],
+                        capture_frames: capture_known_escape,
+                        cloth_rolling_friction: DEFAULT_CLOTH_ROLLING_FRICTION,
+                        cloth_sliding_friction: DEFAULT_CLOTH_SLIDING_FRICTION,
+                        mode: BilliardsMode::ChineseEightBall,
+                        shot: Shot {
+                            angle,
+                            elevation: 0.0,
+                            nominated_color: None,
+                            power: 100.0,
+                            tip,
+                        },
+                    })
+                    .expect("high-power boundary shot must finish");
+                    let cue = result
+                        .balls
+                        .iter()
+                        .find(|candidate| candidate.kind == BallKind::Cue)
+                        .expect("cue ball");
+                    for frame in result.frames.as_deref().unwrap_or_default() {
+                        let frame_cue = &frame.balls[0];
+                        assert!(
+                            frame_cue.pocketed
+                                || point_is_inside_boundary(
+                                    Vec2::new(frame_cue.x, frame_cue.y),
+                                    &geometry.boundary_vertices
+                                ),
+                            "cue left boundary at {} ms for known escape angle",
+                            frame.at_ms
+                        );
+                    }
+                    assert!(
+                        cue.pocketed
+                            || point_is_inside_boundary(
+                                Vec2::new(cue.x, cue.y),
+                                &geometry.boundary_vertices
+                            ),
+                        "cue escaped boundary at ({}, {}) from ({x}, {y}), tip ({}, {}), angle {}",
+                        cue.x,
+                        cue.y,
+                        tip.x,
+                        tip.y,
+                        angle
+                    );
+                }
+            }
+        }
+    }
+
+    fn point_is_inside_boundary(point: Vec2, vertices: &[CircularCushion]) -> bool {
+        let mut inside = false;
+        for (first, second) in vertices.iter().zip(vertices.iter().cycle().skip(1)) {
+            let first = first.center.xy();
+            let second = second.center.xy();
+            if (first.y > point.y) != (second.y > point.y)
+                && point.x
+                    < (second.x - first.x) * (point.y - first.y) / (second.y - first.y) + first.x
+            {
+                inside = !inside;
+            }
+        }
+        inside
     }
 
     #[test]
@@ -1750,9 +1967,9 @@ mod tests {
         assert_vec3(
             balls[0].spin,
             Vec3::new(
-                8.273_676_610_725_82,
-                -47.696_923_084_183_05,
-                -60.711_208_911_809_635,
+                5.909_769_007_661_3,
+                -34.069_230_774_416_46,
+                -43.365_149_222_721_165,
             ),
         );
         assert!((diagnostics.squirt_radians - -0.021_498).abs() < OUTPUT_QUANTUM);
@@ -1822,18 +2039,18 @@ mod tests {
         assert_vec3(
             balls[0].position,
             Vec3::new(
-                0.510_275_173_867_242_6,
-                0.471_289_905_689_436_3,
+                0.516_093_433_527_184_7,
+                0.470_369_478_542_645_7,
                 params.radius,
             ),
         );
         assert_vec3(
             balls[0].velocity,
-            Vec3::new(1.005_503_477_344_853_2, -0.274_201_886_211_274_3, 0.0),
+            Vec3::new(1.121_868_670_543_694_4, -0.292_610_429_147_085_24, 0.0),
         );
         assert_vec3(
             balls[0].spin,
-            Vec3::new(6.257_052_824_910_388, 10.016_318_692_488_77, 10.91),
+            Vec3::new(4.461_790_454_500_358, -2.117_402_233_701_693, 10.91),
         );
     }
 
@@ -1893,7 +2110,7 @@ mod tests {
             }
         ));
         assert!(
-            (event.time - 0.134_217_547_972_059_26).abs() < 1.0e-13,
+            (event.time - 0.104_039_542_350_815_97).abs() < 1.0e-13,
             "{}",
             event.time
         );
@@ -1915,26 +2132,26 @@ mod tests {
         resolve_ball_ball(&mut balls, 0, 1, params);
         assert_vec3(
             balls[0].velocity,
-            Vec3::new(-0.062_500_397_794_790_69, 0.224_492_197_799_776_8, 0.0),
+            Vec3::new(-0.062_500_286_863_010_08, 0.222_858_508_642_801_16, 0.0),
         );
         assert_vec3(
             balls[0].spin,
             Vec3::new(
-                2.000_000_833_212_526,
-                -2.642_857_976_073_557,
-                7.142_500_943_615_547_5,
+                2.000_000_595_155_203,
+                -2.642_857_738_014_329_4,
+                6.428_325_926_613_656,
             ),
         );
         assert_vec3(
             balls[1].velocity,
-            Vec3::new(1.362_500_397_794_790_5, 0.375_507_802_200_223_2, 0.0),
+            Vec3::new(1.362_500_286_863_009_8, 0.377_141_491_357_198_77, 0.0),
         );
         assert_vec3(
             balls[1].spin,
             Vec3::new(
-                -0.999_999_166_787_473_4,
-                2.357_142_023_926_442_7,
-                -1.857_499_056_384_452_5,
+                -0.999_999_404_844_796_2,
+                2.357_142_261_985_67,
+                -2.571_674_073_386_343_5,
             ),
         );
     }

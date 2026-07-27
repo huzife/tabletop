@@ -29,7 +29,7 @@ import type {
   BilliardsSimulationResult,
   ShotAdjudicationInput,
 } from "../server/state.js";
-import type { BilliardsShot } from "../shared/actions.js";
+import { billiardsActionSchema, type BilliardsShot } from "../shared/actions.js";
 import {
   billiardsSettings,
   type BilliardsMode,
@@ -210,10 +210,14 @@ function withSnookerScores(
 }
 
 describe("standard billiards setups", () => {
-  it("keeps only the rule mode in room settings", () => {
+  it("keeps mode and bounded cloth tuning in room settings", () => {
     const parsed = billiardsSettings.schema.parse({ mode: "snooker" });
 
-    expect(parsed).toEqual({ mode: "snooker" });
+    expect(parsed).toEqual({
+      clothRollingFriction: 0.006,
+      clothSlidingFriction: 0.08,
+      mode: "snooker",
+    });
     expect(
       billiardsSettings.schema.safeParse({ mode: "snooker", tableFriction: 0.2 }).success,
     ).toBe(false);
@@ -221,6 +225,30 @@ describe("standard billiards setups", () => {
       billiardsSettings.schema.safeParse({ mode: "snooker", spinConvergence: 1 }).success,
     ).toBe(false);
     expect(billiardsSettings.summarize(parsed)).toEqual([{ label: "模式", value: "斯诺克" }]);
+    expect(
+      billiardsSettings.schema.safeParse({
+        clothRollingFriction: 0.002,
+        clothSlidingFriction: 0.08,
+        mode: "chinese-eight-ball",
+      }).success,
+    ).toBe(false);
+    expect(billiardsSettings.summarize(billiardsSettings.defaultValue)).toEqual([
+      { label: "模式", value: "中式八球" },
+      { label: "滑动摩擦", value: "0.080" },
+      { label: "滚动摩擦", value: "0.006" },
+    ]);
+  });
+
+  it("accepts cue-tip rounding at the legal edge", () => {
+    expect(
+      billiardsActionSchema.safeParse({
+        shot: {
+          ...shot(),
+          tip: { x: 0.95, y: 5e-7 },
+        },
+        type: "billiards.shoot",
+      }).success,
+    ).toBe(true);
   });
 
   it("builds a legal deterministic Chinese eight-ball rack", () => {
@@ -1374,6 +1402,8 @@ describe("authoritative action permissions", () => {
     if (!event || event.type !== "billiards.shot") throw new Error("expected billiards shot event");
     expect(() => billiardsDisplayEventSchema.parse(event)).not.toThrow();
     const legacyEvent: {
+      clothRollingFriction?: number;
+      clothSlidingFriction?: number;
       physicsVersion?: string | null;
       simulationStateHash?: string | null;
       spinConvergence: number;
@@ -1384,16 +1414,22 @@ describe("authoritative action permissions", () => {
       spinConvergence: 1.7,
       tableFriction: 0.26,
     };
+    delete legacyEvent.clothRollingFriction;
+    delete legacyEvent.clothSlidingFriction;
     delete legacyEvent.physicsVersion;
     delete legacyEvent.simulationStateHash;
     const parsedLegacyEvent = billiardsDisplayEventSchema.parse(legacyEvent);
     if (parsedLegacyEvent.type !== "billiards.shot") throw new Error("expected legacy shot event");
     expect(parsedLegacyEvent.physicsVersion).toBeNull();
     expect(parsedLegacyEvent.simulationStateHash).toBeNull();
+    expect(parsedLegacyEvent.clothRollingFriction).toBe(0.006);
+    expect(parsedLegacyEvent.clothSlidingFriction).toBe(0.08);
     expect(parsedLegacyEvent).not.toHaveProperty("spinConvergence");
     expect(parsedLegacyEvent).not.toHaveProperty("tableFriction");
     expect(event).toHaveProperty("initialBalls");
-    expect(event.physicsVersion).toBe("tabletop-billiards-scene-v5");
+    expect(event.physicsVersion).toBe("tabletop-billiards-scene-v6");
+    expect(event.clothRollingFriction).toBe(initial.settings.clothRollingFriction);
+    expect(event.clothSlidingFriction).toBe(initial.settings.clothSlidingFriction);
     expect(event.simulationStateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(event).not.toHaveProperty("spinConvergence");
     expect(event).not.toHaveProperty("tableFriction");
@@ -1401,6 +1437,8 @@ describe("authoritative action permissions", () => {
 
     const replay = simulateBilliardsShot({
       balls: event.initialBalls,
+      clothRollingFriction: event.clothRollingFriction,
+      clothSlidingFriction: event.clothSlidingFriction,
       mode: event.mode,
       shot: event.shot,
     });
@@ -1414,6 +1452,37 @@ describe("authoritative action permissions", () => {
     });
     expect(projected).not.toHaveProperty("spinConvergence");
     expect(projected).not.toHaveProperty("tableFriction");
+  });
+
+  it("keeps the authoritative view valid after the former boundary escape shot", () => {
+    const initial = readyToShoot(
+      createInitialBilliardsState(settings("chinese-eight-ball"), seats),
+    );
+    const positioned = {
+      ...initial,
+      balls: initial.balls.map((ball) =>
+        ball.kind === "cue" ? { ...ball, x: 0.35, y: 0.3 } : ball,
+      ),
+    };
+    const transition = handleBilliardsAction(
+      createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
+      positioned,
+      {
+        shot: {
+          ...shot(),
+          angle: -Math.PI + (5 * Math.PI) / 72,
+          power: 100,
+        },
+        type: "billiards.shoot",
+      },
+    );
+    if (transition.kind !== "applied") throw new Error("expected applied shot");
+    const projected = projectBilliardsView(createTestProjectionContextV1(), transition.state, {
+      kind: "player",
+      seatId: seat1,
+    });
+
+    expect(() => billiardsViewSchema.parse(projected)).not.toThrow();
   });
 
   it("ends immediately on resignation, departure, or expired disconnect grace", () => {

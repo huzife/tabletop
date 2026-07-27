@@ -25,7 +25,6 @@ import {
 import type { FastifyInstance } from "fastify";
 import { ulid } from "ulid";
 import WebSocket, { WebSocketServer } from "ws";
-import { ZodError } from "zod";
 
 import type { AppConfig } from "../config.js";
 import { HttpError } from "../http/errors.js";
@@ -424,7 +423,12 @@ export class RoomConnectionGateway implements RoomPublisher {
       if (raw === undefined) {
         throw new HttpError(400, "VALIDATION_FAILED", "不支持二进制 WebSocket 消息");
       }
-      const parsedJson = JSON.parse(raw) as unknown;
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(raw) as unknown;
+      } catch {
+        throw new HttpError(400, "VALIDATION_FAILED", "命令格式不符合要求");
+      }
       if (
         typeof parsedJson === "object" &&
         parsedJson !== null &&
@@ -454,7 +458,11 @@ export class RoomConnectionGateway implements RoomPublisher {
         return;
       }
       if (!this.#refreshIdentity(connection)) return;
-      const command = clientCommandSchema.parse(parsedJson);
+      const parsedCommand = clientCommandSchema.safeParse(parsedJson);
+      if (!parsedCommand.success) {
+        throw new HttpError(400, "VALIDATION_FAILED", "命令格式不符合要求");
+      }
+      const command = parsedCommand.data;
       requestId = command.requestId;
       if (command.type === "connection.ping") {
         await this.#dispatchCommand(connection, command, performance.now());
@@ -696,9 +704,7 @@ export class RoomConnectionGateway implements RoomPublisher {
     const httpError =
       error instanceof HttpError
         ? error
-        : error instanceof ZodError || error instanceof SyntaxError
-          ? new HttpError(400, "VALIDATION_FAILED", "命令格式不符合要求")
-          : new HttpError(500, "INTERNAL_ROOM_ABORTED", "房间命令处理失败");
+        : new HttpError(500, "INTERNAL_ROOM_ABORTED", "房间命令处理失败");
     if (httpError.statusCode >= 500) {
       this.#app.log.error(
         { connectionId: connection.connectionId, err: error },

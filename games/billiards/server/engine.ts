@@ -24,7 +24,7 @@ import type {
   SystemEventContextV1,
   ViewerV1,
 } from "@tabletop/game-sdk/server";
-import type { BilliardsSettings } from "../shared/settings.js";
+import { billiardsSettings, type BilliardsSettings } from "../shared/settings.js";
 
 export function createBilliardsMatch(
   context: Readonly<CreateMatchContextV1>,
@@ -38,7 +38,8 @@ export function createBilliardsMatch(
   ) {
     throw new GameRuleError("REQUIRES_ONE_OR_TWO_HUMANS");
   }
-  return invokeRulesCore(() => createBilliardsCoreMatch(settings, seatIds));
+  const normalizedSettings = billiardsSettings.schema.parse(settings);
+  return invokeRulesCore(() => createBilliardsCoreMatch(normalizedSettings, seatIds));
 }
 
 export function getBilliardsActiveSeatIds(state: Readonly<BilliardsMatchState>): readonly SeatId[] {
@@ -152,9 +153,12 @@ function transitionForShot(
     throw new GameRuleError("COLOR_NOMINATION_REQUIRED");
   }
 
+  const normalizedSettings = billiardsSettings.schema.parse(state.settings);
   const initialBalls = state.balls.map((ball) => ({ ...ball }));
   const simulation = simulateBilliardsShot({
     balls: initialBalls,
+    clothRollingFriction: normalizedSettings.clothRollingFriction,
+    clothSlidingFriction: normalizedSettings.clothSlidingFriction,
     mode: state.settings.mode,
     shot: action.shot,
   });
@@ -175,6 +179,8 @@ function transitionForShot(
   }
   const nextSeatId = resolution.state.activeSeatId;
   const shotEvent: BilliardsDisplayEvent = {
+    clothRollingFriction: normalizedSettings.clothRollingFriction,
+    clothSlidingFriction: normalizedSettings.clothSlidingFriction,
     durationMs: simulation.durationMs,
     foulCode: resolution.foulCode,
     initialBalls,

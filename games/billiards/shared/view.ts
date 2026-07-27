@@ -8,7 +8,13 @@ import {
   billiardsShotSchema,
   snookerColorSchema,
 } from "./actions.js";
-import { billiardsModeSchema } from "./settings.js";
+import {
+  billiardsModeSchema,
+  CLOTH_ROLLING_FRICTION_RANGE,
+  CLOTH_SLIDING_FRICTION_RANGE,
+  DEFAULT_CLOTH_ROLLING_FRICTION,
+  DEFAULT_CLOTH_SLIDING_FRICTION,
+} from "./settings.js";
 
 export const billiardsBallKindSchema = z.enum([
   "cue",
@@ -206,6 +212,18 @@ export const billiardsViewSchema = z.strictObject({
 export type BilliardsView = z.infer<typeof billiardsViewSchema>;
 
 const shotDisplayEventSchema = z.strictObject({
+  clothRollingFriction: z
+    .number()
+    .finite()
+    .min(CLOTH_ROLLING_FRICTION_RANGE.min)
+    .max(CLOTH_ROLLING_FRICTION_RANGE.max)
+    .default(DEFAULT_CLOTH_ROLLING_FRICTION),
+  clothSlidingFriction: z
+    .number()
+    .finite()
+    .min(CLOTH_SLIDING_FRICTION_RANGE.min)
+    .max(CLOTH_SLIDING_FRICTION_RANGE.max)
+    .default(DEFAULT_CLOTH_SLIDING_FRICTION),
   durationMs: z.number().int().nonnegative().max(300_000),
   foulCode: z.string().min(1).max(64).nullable(),
   initialBalls: z.array(billiardsBallSchema).min(16).max(22),

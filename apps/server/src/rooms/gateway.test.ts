@@ -13,6 +13,7 @@ import {
 import { ulid } from "ulid";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
+import { ZodError } from "zod";
 
 import { PasswordService } from "../auth/password.js";
 import type { AppConfig } from "../config.js";
@@ -669,6 +670,67 @@ describe("RoomConnectionGateway", () => {
     expect(await validErrorPromise).toMatchObject({
       causedBy: validRequestId,
       payload: { code: "ROOM_PERMISSION_DENIED" },
+      type: "command.error",
+    });
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+  });
+
+  it("does not misreport a downstream schema failure as a malformed command", async () => {
+    const { origin, runtime, wsUrl } = await startTestRuntime(cleanups);
+    runtime.repositories.accounts.create({
+      passwordHash: await new PasswordService(1).hash("downstream-error-password"),
+      username: "下游错误分类测试",
+    });
+    const cookies = await login(runtime, "下游错误分类测试", "downstream-error-password");
+    const createdResponse = await runtime.app.inject({
+      headers: unsafeHeaders(cookies, origin),
+      method: "POST",
+      payload: {
+        gameId: "gomoku",
+        name: "下游错误分类测试房",
+        practice: false,
+        settings: {
+          moveTimeSeconds: 60,
+          rule: "freestyle",
+          timerEnabled: false,
+          totalTimeMinutes: 10,
+        },
+      },
+      url: "/api/v1/rooms",
+    });
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json() as { joinTicket: string; roomId: string };
+    const socket = await openSocket(wsUrl, origin, cookies, cleanups);
+    const joinedPromise = waitForSnapshot(socket, created.roomId);
+    send(socket, {
+      payload: { joinTicket: created.joinTicket },
+      protocol: 1,
+      requestId: ulid(),
+      type: "room.join",
+    });
+    const joined = await joinedPromise;
+    vi.spyOn(runtime.rooms.require(created.roomId), "rename").mockRejectedValue(new ZodError([]));
+
+    const requestId = ulid();
+    const errorPromise = waitForServerMessage(
+      socket,
+      (message) => message.type === "command.error" && message.causedBy === requestId,
+    );
+    send(socket, {
+      expectedRevision: joined.revision,
+      payload: { name: "合法的新房间名" },
+      protocol: 1,
+      requestId,
+      roomId: created.roomId,
+      type: "room.rename",
+    });
+
+    expect(await errorPromise).toMatchObject({
+      causedBy: requestId,
+      payload: {
+        code: "INTERNAL_ROOM_ABORTED",
+        message: "房间命令处理失败",
+      },
       type: "command.error",
     });
     expect(socket.readyState).toBe(WebSocket.OPEN);

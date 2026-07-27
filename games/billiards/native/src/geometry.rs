@@ -190,6 +190,16 @@ impl CircularCushion {
         }
     }
 
+    fn from_boundary_vertex(id: String, center: Vec2, height: f64) -> Self {
+        let center = Vec3::new(center.x, center.y, height);
+        Self {
+            id,
+            center,
+            radius: 0.0,
+            aabb: Aabb::around(center.xy(), 0.0),
+        }
+    }
+
     pub fn normal_3d(&self, point: Vec3) -> Vec3 {
         (point - self.center).normalized()
     }
@@ -388,6 +398,10 @@ pub(crate) struct TableGeometry {
     pub table: TableSpec,
     pub linear_cushions: Vec<LinearCushion>,
     pub circular_cushions: Vec<CircularCushion>,
+    /// Closed scene polylines describe finite segments. Their vertices are
+    /// implicit circular collision features so a moving ball cannot pass
+    /// through the numerical gap between two segment projections.
+    pub boundary_vertices: Vec<CircularCushion>,
     pub pockets: Vec<PocketGeometry>,
 }
 
@@ -411,6 +425,7 @@ impl TableGeometry {
             table,
             linear_cushions,
             circular_cushions,
+            boundary_vertices: Vec::new(),
             pockets,
         }
     }
@@ -676,6 +691,18 @@ fn create_chinese_eight_ball_geometry(
         })
         .collect::<Vec<_>>();
     let circular_cushions = Vec::new();
+    let boundary_vertices = boundary
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, point)| {
+            CircularCushion::from_boundary_vertex(
+                format!("scene-v{index:02}"),
+                point,
+                parameters.cushion_height,
+            )
+        })
+        .collect();
     let scale_x = scene.calibration.scale_x(parameters.l);
     let scale_y = scene.calibration.scale_y(parameters.w);
     let mut holes = scene
@@ -719,6 +746,7 @@ fn create_chinese_eight_ball_geometry(
         table,
         linear_cushions,
         circular_cushions,
+        boundary_vertices,
         pockets,
     }
 }
@@ -1011,7 +1039,7 @@ fn build_table_spec(
             outer_width: specs.outer_l,
             outer_height: specs.outer_w,
             cushion_width: specs.cushion_width,
-            ball_diameter: 0.05715,
+            ball_diameter: 0.05715 * 1.4,
             ball_mass: 0.170_097,
             baulk_line_x: Some(specs.l / 4.0),
             d_radius: None,
@@ -1129,6 +1157,14 @@ mod tests {
             };
             assert_eq!(geometry.linear_cushions.len(), linear_count);
             assert_eq!(geometry.circular_cushions.len(), circular_count);
+            assert_eq!(
+                geometry.boundary_vertices.len(),
+                if mode == BilliardsMode::ChineseEightBall {
+                    41
+                } else {
+                    0
+                }
+            );
             assert_eq!(geometry.pockets.len(), 6);
 
             for (collision, published) in geometry
@@ -1168,7 +1204,7 @@ mod tests {
         close(chinese.height, 1.270);
         close(chinese.outer_width, 2.830);
         close(chinese.outer_height, 1.550);
-        close(chinese.ball_diameter, 0.057_15);
+        close(chinese.ball_diameter, 0.057_15 * 1.4);
         close(chinese.pockets[0].x, 0.0);
         close(chinese.pockets[0].y, 0.0);
         close(chinese.pockets[0].mouth_width, 0.084);

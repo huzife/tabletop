@@ -6,7 +6,11 @@ const SEAT_ONE: &str = "seat-1";
 const SEAT_TWO: &str = "seat-2";
 
 fn settings(mode: BilliardsMode) -> BilliardsSettings {
-    BilliardsSettings { mode }
+    BilliardsSettings {
+        cloth_rolling_friction: crate::model::DEFAULT_CLOTH_ROLLING_FRICTION,
+        cloth_sliding_friction: crate::model::DEFAULT_CLOTH_SLIDING_FRICTION,
+        mode,
+    }
 }
 
 fn state(mode: BilliardsMode) -> BilliardsMatchState {

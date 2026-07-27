@@ -40,7 +40,7 @@ describe("Pooltool-compatible billiards core", () => {
   it("publishes the supplied table, ball, mouth and capture dimensions", () => {
     const pool = getBilliardsTableSpec(mode);
     expect(pool).toMatchObject({
-      ballDiameter: 0.05715,
+      ballDiameter: 0.05715 * 1.4,
       ballMass: 0.170097,
       height: 1.27,
       outerHeight: 1.55,
@@ -105,7 +105,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v5");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v6");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -133,6 +133,57 @@ describe("Pooltool-compatible billiards core", () => {
     ).toBe(true);
     expect(result.frames?.at(-1)?.balls[0]?.state).toBe("stationary");
     expect(result.durationMs).toBeGreaterThan(0);
+  });
+
+  it("uses configurable cloth friction and slows spin-to-roll conversion at the new default", () => {
+    const balls = [ball("cue", "cue", 0.55, centreY)];
+    const backspinShot = shot({ power: 10, tip: { x: 0, y: -0.5 } });
+    const tunedDefault = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      mode,
+      shot: backspinShot,
+    });
+    const explicitDefault = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      clothRollingFriction: 0.006,
+      clothSlidingFriction: 0.08,
+      mode,
+      shot: backspinShot,
+    });
+    const formerDefaults = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      clothRollingFriction: 0.01,
+      clothSlidingFriction: 0.2,
+      mode,
+      shot: backspinShot,
+    });
+    const transitionTime = (result: typeof tunedDefault) =>
+      result.events.find(({ kind }) => kind === "sliding_rolling")?.atSeconds ?? Infinity;
+
+    expect(tunedDefault).toEqual(explicitDefault);
+    expect(transitionTime(tunedDefault)).toBeGreaterThan(transitionTime(formerDefaults));
+    expect(tunedDefault.durationMs).toBeGreaterThan(formerDefaults.durationMs);
+  });
+
+  it("contains the high-power angle that previously escaped through a boundary vertex", () => {
+    const result = simulateBilliardsShot({
+      balls: [ball("cue", "cue", 0.35, 0.3)],
+      mode,
+      shot: shot({
+        angle: -Math.PI + (5 * Math.PI) / 72,
+        power: 100,
+      }),
+    });
+    const cue = result.balls[0]!;
+
+    expect(cue.pocketed || (cue.x >= -0.2 && cue.x <= 2.74 && cue.y >= -0.2 && cue.y <= 1.47)).toBe(
+      true,
+    );
+    expect(Math.abs(cue.x)).toBeLessThan(5);
+    expect(Math.abs(cue.y)).toBeLessThan(3);
   });
 
   it("uses the frictional-inelastic ball collision and reports first contact", () => {

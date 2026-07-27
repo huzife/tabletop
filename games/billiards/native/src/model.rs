@@ -1,7 +1,21 @@
 use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v5";
+pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v6";
+pub const DEFAULT_CLOTH_SLIDING_FRICTION: f64 = 0.08;
+pub const DEFAULT_CLOTH_ROLLING_FRICTION: f64 = 0.006;
+pub const MIN_CLOTH_SLIDING_FRICTION: f64 = 0.04;
+pub const MAX_CLOTH_SLIDING_FRICTION: f64 = 0.2;
+pub const MIN_CLOTH_ROLLING_FRICTION: f64 = 0.003;
+pub const MAX_CLOTH_ROLLING_FRICTION: f64 = 0.02;
+
+pub const fn default_cloth_sliding_friction() -> f64 {
+    DEFAULT_CLOTH_SLIDING_FRICTION
+}
+
+pub const fn default_cloth_rolling_friction() -> f64 {
+    DEFAULT_CLOTH_ROLLING_FRICTION
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BilliardsMode {
@@ -67,6 +81,10 @@ pub struct SimulateShotInput {
     pub balls: Vec<Ball>,
     #[serde(default)]
     pub capture_frames: bool,
+    #[serde(default = "default_cloth_rolling_friction")]
+    pub cloth_rolling_friction: f64,
+    #[serde(default = "default_cloth_sliding_friction")]
+    pub cloth_sliding_friction: f64,
     pub mode: BilliardsMode,
     pub shot: Shot,
 }
@@ -75,6 +93,10 @@ pub struct SimulateShotInput {
 #[serde(rename_all = "camelCase")]
 pub struct PredictShotInput {
     pub balls: Vec<Ball>,
+    #[serde(default = "default_cloth_rolling_friction")]
+    pub cloth_rolling_friction: f64,
+    #[serde(default = "default_cloth_sliding_friction")]
+    pub cloth_sliding_friction: f64,
     pub mode: BilliardsMode,
     pub shot: Shot,
     #[serde(default = "default_prediction_frames")]
