@@ -458,7 +458,10 @@ fn apply_cue_strike(
     let cue = CueParameters::for_mode(mode);
     let cue_speed = CUE_SPEED_AT_HALF_POWER * shot.power / 50.0;
     let theta = shot.elevation.to_radians();
-    let a = shot.tip.x;
+    // Product shots use the shooter's view (left negative, right positive).
+    // Pooltool's cue frame is the inverse: a=-1 is the rightmost contact and
+    // a=+1 is the leftmost contact.
+    let a = -shot.tip.x;
     let b = shot.tip.y;
     let cue_c = (1.0 - a * a - b * b).max(0.0).sqrt();
     let ball_a = a;
@@ -1719,7 +1722,7 @@ mod tests {
     }
 
     #[test]
-    fn off_center_strike_matches_pinned_pooltool_oracle() {
+    fn product_left_strike_matches_pinned_pooltool_oracle() {
         let params = ball_parameters(BilliardsMode::ChineseEightBall);
         let table = TableGeometry::for_mode(BilliardsMode::ChineseEightBall);
         let (mut balls, _) = dynamic_balls(
@@ -1734,7 +1737,8 @@ mod tests {
                 elevation: 20.0,
                 nominated_color: None,
                 power: 50.0,
-                tip: CueTip { x: 0.3, y: -0.2 },
+                // Product left (-0.3) maps to Pooltool's a=+0.3.
+                tip: CueTip { x: -0.3, y: -0.2 },
             },
             BilliardsMode::ChineseEightBall,
             params,
@@ -1752,6 +1756,54 @@ mod tests {
             ),
         );
         assert!((diagnostics.squirt_radians - -0.021_498).abs() < OUTPUT_QUANTUM);
+    }
+
+    #[test]
+    fn shooter_view_side_spin_rebounds_to_the_matching_side() {
+        let params = ball_parameters(BilliardsMode::ChineseEightBall);
+        let table = TableGeometry::for_mode(BilliardsMode::ChineseEightBall);
+        let source = [ball("cue", BallKind::Cue, 0.5, 0.5)];
+        let make_ball = |tip_x| {
+            let (mut balls, _) = dynamic_balls(&source, &table.table, params);
+            let diagnostics = apply_cue_strike(
+                &mut balls[0],
+                &Shot {
+                    angle: 0.0,
+                    elevation: 0.0,
+                    nominated_color: None,
+                    power: 50.0,
+                    tip: CueTip { x: tip_x, y: 0.0 },
+                },
+                BilliardsMode::ChineseEightBall,
+                params,
+            );
+            (balls.remove(0), diagnostics)
+        };
+        let (mut right, right_diagnostics) = make_ball(0.4);
+        let (mut left, left_diagnostics) = make_ball(-0.4);
+
+        // Facing +X, shooter-right is -Y. A right contact creates positive
+        // Z spin and squirt initially deflects to the opposite (+Y) side.
+        assert!(right.spin.z > 0.0);
+        assert!(left.spin.z < 0.0);
+        assert!(right_diagnostics.squirt_radians > 0.0);
+        assert!(left_diagnostics.squirt_radians < 0.0);
+
+        // Isolate the spin transfer at a head-on +X rail. Cushion friction
+        // sends right english toward shooter-right (-Y), with left english
+        // producing its exact mirror.
+        right.velocity = Vec3::new(1.0, 0.0, 0.0);
+        left.velocity = Vec3::new(1.0, 0.0, 0.0);
+        let inward_normal = Vec3::new(-1.0, 0.0, 0.0);
+        resolve_cushion(&mut right, inward_normal, params);
+        resolve_cushion(&mut left, inward_normal, params);
+
+        assert!(right.velocity.x < 0.0);
+        assert!(right.velocity.y < 0.0);
+        assert!(left.velocity.y > 0.0);
+        assert!((right.velocity.x - left.velocity.x).abs() < 1.0e-12);
+        assert!((right.velocity.y + left.velocity.y).abs() < 1.0e-12);
+        assert!((right.spin.z + left.spin.z).abs() < 1.0e-12);
     }
 
     #[test]

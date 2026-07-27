@@ -51,14 +51,14 @@ describe("Pooltool-compatible billiards core", () => {
       0.084, 0.088, 0.084, 0.084, 0.088, 0.084,
     ]);
     for (const pocket of pool.pockets) {
-      expect(pocket.captureRadius).toBeCloseTo(0.06879084312504863, 12);
+      expect(pocket.captureRadius).toBeCloseTo(0.07105656026656737, 12);
     }
     expect(pool.pockets[0]).toMatchObject({ x: 0, y: 0 });
-    expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.02075736648250448, 12);
-    expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.03468153364632253, 12);
+    expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.026940020961878627, 12);
+    expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.033748697793534704, 12);
     expect(pool.pockets[1]).toMatchObject({ x: 2.54 / 2, y: 0 });
-    expect(pool.pockets[1]?.captureX).toBeCloseTo(1.2718515960712096, 12);
-    expect(pool.pockets[1]?.captureY).toBeCloseTo(-0.05555007824726151, 12);
+    expect(pool.pockets[1]?.captureX).toBeCloseTo(1.272250859709348, 12);
+    expect(pool.pockets[1]?.captureY).toBeCloseTo(-0.06518296037789428, 12);
 
     const snooker = getBilliardsTableSpec("snooker");
     expect(snooker).toMatchObject({
@@ -105,7 +105,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v4");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v5");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -173,6 +173,39 @@ describe("Pooltool-compatible billiards core", () => {
     expect(result.events.find(({ kind }) => kind === "ball_cushion")?.geometryId).toMatch(
       /^scene-\d{2}$/,
     );
+  });
+
+  it("applies left and right english on the matching side after a rail", () => {
+    const simulateSideSpin = (tipX: number) =>
+      simulateBilliardsShot({
+        balls: [ball("cue", "cue", 0.55, centreY)],
+        captureFrames: true,
+        mode,
+        shot: shot({ power: 42, tip: { x: tipX, y: 0 } }),
+      });
+    const left = simulateSideSpin(-0.4);
+    const right = simulateSideSpin(0.4);
+    const yDeltaAfterFirstRail = (result: ReturnType<typeof simulateSideSpin>): number => {
+      const rail = result.events.find(({ kind }) => kind === "ball_cushion");
+      if (rail === undefined || result.frames === undefined) {
+        throw new Error("side-spin test shot did not reach a rail");
+      }
+      const afterIndex = result.frames.findIndex(({ atMs }) => atMs > rail.atSeconds * 1000);
+      if (afterIndex <= 0) throw new Error("side-spin test is missing post-rail frames");
+      const before = result.frames[afterIndex - 1]?.balls[0];
+      const after = result.frames[afterIndex]?.balls[0];
+      if (before === undefined || after === undefined) {
+        throw new Error("side-spin test is missing cue-ball frames");
+      }
+      return after.y - before.y;
+    };
+
+    expect(left.frames?.[0]?.balls[0]?.spinZ).toBeLessThan(0);
+    expect(right.frames?.[0]?.balls[0]?.spinZ).toBeGreaterThan(0);
+    expect(left.cueStrike.squirtRadians).toBeLessThan(0);
+    expect(right.cueStrike.squirtRadians).toBeGreaterThan(0);
+    expect(yDeltaAfterFirstRail(left)).toBeGreaterThan(0);
+    expect(yDeltaAfterFirstRail(right)).toBeLessThan(0);
   });
 
   it("places a potted ball at Pooltool's canonical pocket centre", () => {

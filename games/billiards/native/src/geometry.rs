@@ -420,12 +420,11 @@ pub(crate) fn configure_table_scene(mode: BilliardsMode, value: Value) -> Result
     match mode {
         BilliardsMode::ChineseEightBall => {
             let scene = parse_chinese_eight_ball_scene(value)?;
-            let outer_width = scene.canvas_width * scene.calibration.scale_x(2.540);
-            let outer_height = scene.canvas_height * scene.calibration.scale_y(1.270);
-            if (outer_width - 2.830).abs() > EPSILON || (outer_height - 1.550).abs() > EPSILON {
+            if (scene.canvas_width - 2_830.0).abs() > EPSILON
+                || (scene.canvas_height - 1_550.0).abs() > EPSILON
+            {
                 return Err(
-                    "Chinese eight-ball scene must map to a 2.830 m by 1.550 m outer table"
-                        .to_owned(),
+                    "Chinese eight-ball scene canvas must be 2830 by 1550 scene units".to_owned(),
                 );
             }
             let _ = CHINESE_EIGHT_BALL_SCENE.set(scene);
@@ -716,8 +715,6 @@ fn create_chinese_eight_ball_geometry(
         &circular_cushions,
         &pockets,
     );
-    debug_assert!((scene.canvas_width * scale_x - parameters.outer_l).abs() <= EPSILON);
-    debug_assert!((scene.canvas_height * scale_y - parameters.outer_w).abs() <= EPSILON);
     TableGeometry {
         table,
         linear_cushions,
@@ -1178,12 +1175,12 @@ mod tests {
         close(chinese.pockets[1].x, 1.270);
         close(chinese.pockets[1].y, 0.0);
         close(chinese.pockets[1].mouth_width, 0.088);
-        close(chinese.pockets[0].capture_x, -0.020_757_366_482_504_48);
-        close(chinese.pockets[0].capture_y, -0.034_681_533_646_322_53);
-        close(chinese.pockets[1].capture_x, 1.271_851_596_071_209_6);
-        close(chinese.pockets[1].capture_y, -0.055_550_078_247_261_51);
-        close(chinese.pockets[0].capture_radius, 0.068_790_843_125_048_63);
-        close(chinese.pockets[1].capture_radius, 0.068_790_843_125_048_63);
+        close(chinese.pockets[0].capture_x, -0.026_940_020_961_878_627);
+        close(chinese.pockets[0].capture_y, -0.033_748_697_793_534_704);
+        close(chinese.pockets[1].capture_x, 1.272_250_859_709_348);
+        close(chinese.pockets[1].capture_y, -0.065_182_960_377_894_28);
+        close(chinese.pockets[0].capture_radius, 0.071_056_560_266_567_37);
+        close(chinese.pockets[1].capture_radius, 0.071_056_560_266_567_37);
 
         let snooker = table_spec(BilliardsMode::Snooker);
         close(snooker.width, 3.569);
@@ -1213,9 +1210,9 @@ mod tests {
         assert_eq!(scene.holes.len(), 6);
         close(scene.canvas_width, 2_830.0);
         close(scene.canvas_height, 1_550.0);
-        close(scene.calibration.left, 145.0);
-        close(scene.calibration.right, 2_685.0);
-        close(scene.calibration.top, 140.0);
-        close(scene.calibration.bottom, 1_410.0);
+        close(scene.calibration.left, 166.013_878_264_714_66);
+        close(scene.calibration.right, 2_650.953_007_470_327_5);
+        close(scene.calibration.top, 161.625_385_579_340_08);
+        close(scene.calibration.bottom, 1_378.432_885_643_540_7);
     }
 }

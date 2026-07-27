@@ -1,7 +1,7 @@
 use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v4";
+pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v5";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BilliardsMode {
@@ -43,7 +43,11 @@ pub struct Ball {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CueTip {
+    /// Horizontal contact offset in the shooter's view: negative is left,
+    /// positive is right.
     pub x: f64,
+    /// Vertical contact offset in the shooter's view: negative is bottom,
+    /// positive is top.
     pub y: f64,
 }
 

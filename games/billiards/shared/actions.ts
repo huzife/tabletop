@@ -3,6 +3,8 @@ import { z } from "zod";
 export const snookerColorSchema = z.enum(["yellow", "green", "brown", "blue", "pink", "black"]);
 export type SnookerColor = z.infer<typeof snookerColorSchema>;
 
+// Shooter-view cue-ball face: X is left-negative/right-positive and Y is
+// bottom-negative/top-positive.
 export const cueTipSchema = z
   .strictObject({
     x: z.number().finite().min(-0.95).max(0.95),

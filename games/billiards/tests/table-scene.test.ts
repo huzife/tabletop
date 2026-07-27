@@ -40,27 +40,22 @@ describe("Chinese eight-ball scene asset", () => {
     );
   });
 
-  it("uses millimetre scene units for the official outer and playing dimensions", () => {
+  it("calibrates authored scene units to the official playing dimensions", () => {
     const calibration = deriveBilliardsSceneCalibration(scene);
 
     expect(scene.document.canvas).toMatchObject({ height: 1550, width: 2830 });
     expect(calibration).toEqual({
-      bottom: 1410,
-      left: 145,
-      right: 2685,
-      top: 140,
+      bottom: 1378.4328856435407,
+      left: 166.01387826471466,
+      right: 2650.9530074703275,
+      top: 161.62538557934008,
     } satisfies BilliardsSceneCalibration);
-    expect(calibration.right - calibration.left).toBe(2540);
-    expect(calibration.bottom - calibration.top).toBe(1270);
-    expect(scene.document.canvas.width / (calibration.right - calibration.left)).toBeCloseTo(
-      2.83 / 2.54,
-      12,
-    );
-    expect(scene.document.canvas.height / (calibration.bottom - calibration.top)).toBeCloseTo(
-      1.55 / 1.27,
-      12,
-    );
-    expect(57.15 / (calibration.right - calibration.left)).toBeCloseTo(0.05715 / 2.54, 12);
+    const scaleX = 2540 / (calibration.right - calibration.left);
+    const scaleY = 1270 / (calibration.bottom - calibration.top);
+    expect((calibration.right - calibration.left) * scaleX).toBeCloseTo(2540, 12);
+    expect((calibration.bottom - calibration.top) * scaleY).toBeCloseTo(1270, 12);
+    expect(scaleX).toBeCloseTo(1.0221578348327547, 12);
+    expect(scaleY).toBeCloseTo(1.0437148028204897, 12);
   });
 
   it("rejects a reserved element with the wrong fixed name", () => {
@@ -89,7 +84,7 @@ describe("Chinese eight-ball scene asset", () => {
     table.width = 2831;
 
     expect(() => parseBilliardsTableScene("chinese-eight-ball", malformed)).toThrow(
-      "2830 × 1550 mm",
+      "2830 × 1550 scene-unit",
     );
   });
 });

@@ -38,8 +38,9 @@ export interface BilliardsSceneCalibration {
 
 /**
  * Validates the billiards-specific contract layered on top of tabletop.scene/v1.
- * Billiards scene coordinates are millimetres with the full outer table as the
- * canvas; the runtime derives physical metres from the boundary calibration.
+ * The runtime derives physical metres from the authored boundary calibration,
+ * so scene units remain aligned even when the source image is not drawn at a
+ * one-unit-per-millimetre scale.
  */
 export function parseBilliardsTableScene(mode: BilliardsMode, input: unknown): BilliardsTableScene {
   const document = parseSceneDocument(input);
@@ -113,15 +114,13 @@ export function parseBilliardsTableScene(mode: BilliardsMode, input: unknown): B
   }
 
   const scene = { boundary, document, holes, mode, table };
-  const calibration = deriveBilliardsSceneCalibration(scene);
+  deriveBilliardsSceneCalibration(scene);
   if (
     mode === "chinese-eight-ball" &&
     (document.canvas.width !== CHINESE_EIGHT_BALL_SCENE_DIMENSIONS.outerWidth ||
-      document.canvas.height !== CHINESE_EIGHT_BALL_SCENE_DIMENSIONS.outerHeight ||
-      calibration.right - calibration.left !== CHINESE_EIGHT_BALL_SCENE_DIMENSIONS.playWidth ||
-      calibration.bottom - calibration.top !== CHINESE_EIGHT_BALL_SCENE_DIMENSIONS.playHeight)
+      document.canvas.height !== CHINESE_EIGHT_BALL_SCENE_DIMENSIONS.outerHeight)
   ) {
-    throw new Error(`${mode} 场景必须使用 2830 × 1550 mm 外沿和 2540 × 1270 mm 有效比赛区`);
+    throw new Error(`${mode} 场景画布必须使用 2830 × 1550 scene-unit`);
   }
   return scene;
 }
