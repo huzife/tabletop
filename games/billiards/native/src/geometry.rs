@@ -1,5 +1,8 @@
 use crate::math::{EPSILON, Vec2, Vec3};
-use crate::model::{BilliardsMode, PocketKind, PocketSpec, SpotSpec, TableSpec};
+use crate::model::{
+    BilliardsMode, CircularCushionSpec, LinearCushionSpec, PocketKind, PocketSpec, SpotSpec,
+    TableSpec,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Aabb {
@@ -167,6 +170,8 @@ pub(crate) struct PocketGeometry {
 struct PocketTableParameters {
     l: f64,
     w: f64,
+    outer_l: f64,
+    outer_w: f64,
     cushion_width: f64,
     cushion_height: f64,
     cushion_nose_radius: f64,
@@ -186,38 +191,42 @@ impl PocketTableParameters {
     fn for_mode(mode: BilliardsMode) -> Self {
         match mode {
             BilliardsMode::ChineseEightBall => Self {
-                l: 1.9812,
-                w: 0.9906,
-                cushion_width: 0.0508,
+                l: 2.540,
+                w: 1.270,
+                outer_l: 2.830,
+                outer_w: 1.550,
+                cushion_width: 0.050,
                 cushion_height: 0.036_576,
                 cushion_nose_radius: 0.005,
-                corner_pocket_width: 0.118,
-                corner_pocket_angle: 5.3,
-                corner_pocket_depth: 0.0417,
-                corner_pocket_radius: 0.062,
-                corner_jaw_radius: 0.02095,
-                side_pocket_width: 0.137,
-                side_pocket_angle: 7.14,
-                side_pocket_depth: 0.0685,
-                side_pocket_radius: 0.0645,
-                side_jaw_radius: 0.00795,
+                corner_pocket_width: 0.084,
+                corner_pocket_angle: 0.0,
+                corner_pocket_depth: 0.067_35,
+                corner_pocket_radius: 0.088_9,
+                corner_jaw_radius: 0.088_9,
+                side_pocket_width: 0.088,
+                side_pocket_angle: 0.0,
+                side_pocket_depth: 0.051_59,
+                side_pocket_radius: 0.053_19,
+                side_jaw_radius: 0.066_9,
             },
             BilliardsMode::Snooker => Self {
                 l: 3.569,
                 w: 1.778,
-                cushion_width: 0.04763,
+                outer_l: 3.850,
+                outer_w: 2.060,
+                cushion_width: 0.047_63,
                 cushion_height: 0.039,
                 cushion_nose_radius: 0.005,
-                corner_pocket_width: 0.08014,
+                corner_pocket_width: 0.086,
                 corner_pocket_angle: 0.0,
-                corner_pocket_depth: 0.06735,
-                corner_pocket_radius: 0.0889,
-                corner_jaw_radius: 0.0889,
-                side_pocket_width: 0.08457,
+                corner_pocket_depth: 0.067_35,
+                corner_pocket_radius: 0.088_9,
+                corner_jaw_radius: 0.088_9,
+                side_pocket_width: 0.089,
                 side_pocket_angle: 0.0,
-                side_pocket_depth: 0.05159,
-                side_pocket_radius: 0.05319,
-                side_jaw_radius: 0.0669,
+                side_pocket_depth: 0.051_59,
+                side_pocket_radius: 0.053_19,
+                side_jaw_radius: 0.066_9,
             },
         }
     }
@@ -234,10 +243,16 @@ pub(crate) struct TableGeometry {
 impl TableGeometry {
     pub fn for_mode(mode: BilliardsMode) -> Self {
         let parameters = PocketTableParameters::for_mode(mode);
-        let table = table_spec(mode);
         let linear_cushions = create_linear_cushions(parameters);
         let circular_cushions = create_circular_cushions(parameters);
         let pockets = create_pockets(parameters);
+        let table = build_table_spec(
+            mode,
+            parameters,
+            &linear_cushions,
+            &circular_cushions,
+            &pockets,
+        );
         Self {
             table,
             linear_cushions,
@@ -463,19 +478,69 @@ fn create_pockets(specs: PocketTableParameters) -> Vec<PocketGeometry> {
         .collect()
 }
 
-pub fn table_spec(mode: BilliardsMode) -> TableSpec {
-    let specs = PocketTableParameters::for_mode(mode);
-    let pockets = create_pockets(specs)
-        .into_iter()
-        .map(|pocket| PocketSpec {
-            capture_radius: pocket.radius,
-            kind: if pocket.id == "lc" || pocket.id == "rc" {
-                PocketKind::Side
-            } else {
-                PocketKind::Corner
-            },
-            x: pocket.center.x,
-            y: pocket.center.y,
+fn build_table_spec(
+    mode: BilliardsMode,
+    specs: PocketTableParameters,
+    linear_cushions: &[LinearCushion],
+    circular_cushions: &[CircularCushion],
+    pockets: &[PocketGeometry],
+) -> TableSpec {
+    let pockets = pockets
+        .iter()
+        .map(|pocket| {
+            let (kind, mouth_width, x, y) = match pocket.id.as_str() {
+                "lb" => (PocketKind::Corner, specs.corner_pocket_width, 0.0, 0.0),
+                "lc" => (
+                    PocketKind::Side,
+                    specs.side_pocket_width,
+                    specs.l * 0.5,
+                    0.0,
+                ),
+                "lt" => (PocketKind::Corner, specs.corner_pocket_width, specs.l, 0.0),
+                "rb" => (PocketKind::Corner, specs.corner_pocket_width, 0.0, specs.w),
+                "rc" => (
+                    PocketKind::Side,
+                    specs.side_pocket_width,
+                    specs.l * 0.5,
+                    specs.w,
+                ),
+                "rt" => (
+                    PocketKind::Corner,
+                    specs.corner_pocket_width,
+                    specs.l,
+                    specs.w,
+                ),
+                _ => unreachable!("standard table contains only six named pockets"),
+            };
+            PocketSpec {
+                id: pocket.id.clone(),
+                capture_radius: pocket.radius,
+                capture_x: pocket.center.x,
+                capture_y: pocket.center.y,
+                kind,
+                mouth_width,
+                x,
+                y,
+            }
+        })
+        .collect();
+    let linear_cushions = linear_cushions
+        .iter()
+        .map(|cushion| LinearCushionSpec {
+            id: cushion.id.clone(),
+            x1: cushion.p1.x,
+            y1: cushion.p1.y,
+            x2: cushion.p2.x,
+            y2: cushion.p2.y,
+        })
+        .collect();
+    let circular_cushions = circular_cushions
+        .iter()
+        .map(|cushion| CircularCushionSpec {
+            id: cushion.id.clone(),
+            x: cushion.center.x,
+            y: cushion.center.y,
+            radius: cushion.radius,
         })
         .collect();
     match mode {
@@ -483,11 +548,16 @@ pub fn table_spec(mode: BilliardsMode) -> TableSpec {
             mode,
             width: specs.l,
             height: specs.w,
+            outer_width: specs.outer_l,
+            outer_height: specs.outer_w,
+            cushion_width: specs.cushion_width,
             ball_diameter: 0.05715,
             ball_mass: 0.170_097,
             baulk_line_x: Some(specs.l / 4.0),
             d_radius: None,
             pockets,
+            linear_cushions,
+            circular_cushions,
             spots: vec![SpotSpec {
                 id: "foot",
                 x: specs.l * 0.75,
@@ -498,11 +568,16 @@ pub fn table_spec(mode: BilliardsMode) -> TableSpec {
             mode,
             width: specs.l,
             height: specs.w,
-            ball_diameter: 0.052_387_5,
+            outer_width: specs.outer_l,
+            outer_height: specs.outer_w,
+            cushion_width: specs.cushion_width,
+            ball_diameter: 0.052_5,
             ball_mass: 0.140,
             baulk_line_x: Some(0.737),
             d_radius: Some(0.292),
             pockets,
+            linear_cushions,
+            circular_cushions,
             spots: vec![
                 SpotSpec {
                     id: "green",
@@ -539,6 +614,10 @@ pub fn table_spec(mode: BilliardsMode) -> TableSpec {
     }
 }
 
+pub fn table_spec(mode: BilliardsMode) -> TableSpec {
+    TableGeometry::for_mode(mode).table
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,124 +630,108 @@ mod tests {
     }
 
     #[test]
-    fn prebuilt_parameters_match_pooltool_collection() {
+    fn table_profiles_match_the_supplied_dimensions() {
         let pool = PocketTableParameters::for_mode(BilliardsMode::ChineseEightBall);
         assert_eq!(
             [
                 pool.l,
                 pool.w,
+                pool.outer_l,
+                pool.outer_w,
                 pool.cushion_width,
-                pool.cushion_height,
-                pool.cushion_nose_radius,
                 pool.corner_pocket_width,
-                pool.corner_pocket_angle,
-                pool.corner_pocket_depth,
-                pool.corner_pocket_radius,
-                pool.corner_jaw_radius,
                 pool.side_pocket_width,
-                pool.side_pocket_angle,
-                pool.side_pocket_depth,
-                pool.side_pocket_radius,
-                pool.side_jaw_radius,
             ],
-            [
-                1.9812, 0.9906, 0.0508, 0.036_576, 0.005, 0.118, 5.3, 0.0417, 0.062, 0.02095,
-                0.137, 7.14, 0.0685, 0.0645, 0.00795,
-            ]
+            [2.540, 1.270, 2.830, 1.550, 0.050, 0.084, 0.088]
         );
         let snooker = PocketTableParameters::for_mode(BilliardsMode::Snooker);
         assert_eq!(
             [
                 snooker.l,
                 snooker.w,
+                snooker.outer_l,
+                snooker.outer_w,
                 snooker.cushion_width,
-                snooker.cushion_height,
-                snooker.cushion_nose_radius,
                 snooker.corner_pocket_width,
-                snooker.corner_pocket_angle,
-                snooker.corner_pocket_depth,
-                snooker.corner_pocket_radius,
-                snooker.corner_jaw_radius,
                 snooker.side_pocket_width,
-                snooker.side_pocket_angle,
-                snooker.side_pocket_depth,
-                snooker.side_pocket_radius,
-                snooker.side_jaw_radius,
             ],
-            [
-                3.569, 1.778, 0.04763, 0.039, 0.005, 0.08014, 0.0, 0.06735, 0.0889, 0.0889,
-                0.08457, 0.0, 0.05159, 0.05319, 0.0669,
-            ]
+            [3.569, 1.778, 3.850, 2.060, 0.047_63, 0.086, 0.089]
         );
     }
 
     #[test]
-    fn seven_foot_showood_geometry_matches_pooltool_layout() {
-        let geometry = TableGeometry::for_mode(BilliardsMode::ChineseEightBall);
-        assert_eq!(geometry.linear_cushions.len(), 18);
-        assert_eq!(geometry.circular_cushions.len(), 12);
-        assert_eq!(geometry.pockets.len(), 6);
-        close(geometry.table.width, 1.9812);
-        close(geometry.table.height, 0.9906);
-        close(geometry.table.ball_diameter, 0.05715);
-        close(geometry.table.ball_mass, 0.170_097);
+    fn published_table_geometry_is_the_collision_geometry() {
+        for mode in [BilliardsMode::ChineseEightBall, BilliardsMode::Snooker] {
+            let geometry = TableGeometry::for_mode(mode);
+            assert_eq!(geometry.linear_cushions.len(), 18);
+            assert_eq!(geometry.circular_cushions.len(), 12);
+            assert_eq!(geometry.pockets.len(), 6);
 
-        let corner_angle = (5.3_f64 + 45.0).to_radians();
-        let corner_offset = 0.02095 / ((std::f64::consts::FRAC_PI_2 + corner_angle) / 2.0).tan();
-        let first = geometry
-            .linear_cushions
-            .iter()
-            .find(|cushion| cushion.id == "3")
-            .unwrap();
-        close(
-            first.p1.x,
-            0.118 * std::f64::consts::FRAC_1_SQRT_2 + corner_offset,
-        );
-        close(first.p1.y, 0.0);
-        close(first.p1.z, 0.036_576);
-        assert_eq!(first.direction, CushionDirection::Side2);
-
-        let first_tip = geometry
-            .circular_cushions
-            .iter()
-            .find(|cushion| cushion.id == "1t")
-            .unwrap();
-        close(first_tip.center.x, -0.02095);
-        close(
-            first_tip.center.y,
-            0.118 * std::f64::consts::FRAC_1_SQRT_2 + corner_offset,
-        );
-        close(first_tip.radius, 0.02095);
-
-        let lower_left = geometry
-            .pockets
-            .iter()
-            .find(|pocket| pocket.id == "lb")
-            .unwrap();
-        close(
-            lower_left.center.x,
-            -0.0417 * std::f64::consts::FRAC_1_SQRT_2,
-        );
-        close(
-            lower_left.center.y,
-            -0.0417 * std::f64::consts::FRAC_1_SQRT_2,
-        );
-        close(lower_left.radius, 0.062);
-        close(lower_left.center.z, 0.0);
-        close(lower_left.depth, 0.08);
+            for (collision, published) in geometry
+                .linear_cushions
+                .iter()
+                .zip(&geometry.table.linear_cushions)
+            {
+                assert_eq!(collision.id, published.id);
+                close(collision.p1.x, published.x1);
+                close(collision.p1.y, published.y1);
+                close(collision.p2.x, published.x2);
+                close(collision.p2.y, published.y2);
+            }
+            for (collision, published) in geometry
+                .circular_cushions
+                .iter()
+                .zip(&geometry.table.circular_cushions)
+            {
+                assert_eq!(collision.id, published.id);
+                close(collision.center.x, published.x);
+                close(collision.center.y, published.y);
+                close(collision.radius, published.radius);
+            }
+            for (collision, published) in geometry.pockets.iter().zip(&geometry.table.pockets) {
+                assert_eq!(collision.id, published.id);
+                close(collision.center.x, published.capture_x);
+                close(collision.center.y, published.capture_y);
+                close(collision.radius, published.capture_radius);
+            }
+        }
     }
 
     #[test]
-    fn generic_snooker_geometry_matches_pooltool_collection() {
-        let geometry = TableGeometry::for_mode(BilliardsMode::Snooker);
-        assert_eq!(geometry.linear_cushions.len(), 18);
-        assert_eq!(geometry.circular_cushions.len(), 12);
-        close(geometry.table.width, 3.569);
-        close(geometry.table.height, 1.778);
-        close(geometry.table.ball_diameter, 0.052_387_5);
-        close(geometry.table.ball_mass, 0.140);
-        close(geometry.pockets[0].radius, 0.0889);
-        close(geometry.pockets[1].radius, 0.05319);
-        close(geometry.pockets[1].center.y, -0.05159);
+    fn table_specs_publish_nominal_mouths_and_capture_basins_separately() {
+        let chinese = table_spec(BilliardsMode::ChineseEightBall);
+        close(chinese.width, 2.540);
+        close(chinese.height, 1.270);
+        close(chinese.outer_width, 2.830);
+        close(chinese.outer_height, 1.550);
+        close(chinese.ball_diameter, 0.057_15);
+        close(chinese.pockets[0].x, 0.0);
+        close(chinese.pockets[0].y, 0.0);
+        close(chinese.pockets[0].mouth_width, 0.084);
+        close(chinese.pockets[1].x, 1.270);
+        close(chinese.pockets[1].y, 0.0);
+        close(chinese.pockets[1].mouth_width, 0.088);
+        close(chinese.pockets[0].capture_radius, 0.088_9);
+        close(chinese.pockets[1].capture_radius, 0.053_19);
+
+        let snooker = table_spec(BilliardsMode::Snooker);
+        close(snooker.width, 3.569);
+        close(snooker.height, 1.778);
+        close(snooker.outer_width, 3.850);
+        close(snooker.outer_height, 2.060);
+        close(snooker.ball_diameter, 0.052_5);
+        close(snooker.pockets[0].mouth_width, 0.086);
+        close(snooker.pockets[1].mouth_width, 0.089);
+        close(snooker.baulk_line_x.unwrap(), 0.737);
+        close(snooker.d_radius.unwrap(), 0.292);
+        close(
+            snooker
+                .spots
+                .iter()
+                .find(|spot| spot.id == "black")
+                .unwrap()
+                .x,
+            3.245,
+        );
     }
 }

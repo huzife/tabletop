@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { seatIdSchema } from "@tabletop/protocol";
 
+import { getBilliardsTableSpec } from "../physics/index.js";
 import type { BilliardsBreakChoice } from "../shared/actions.js";
-import { tableSpecFor } from "../shared/table.js";
 import type { BilliardsView } from "../shared/view.js";
-import { pocketCircle, tableGeometry, tablePointFromClient } from "../web/canvas.js";
+import {
+  pocketCircle,
+  pocketMouthCircle,
+  tableGeometry,
+  tablePointFromClient,
+} from "../web/canvas.js";
 import {
   breakChoiceLabel,
   breakDecisionReasonLabel,
@@ -70,10 +75,16 @@ describe("billiards cue-tip control", () => {
 
 describe("billiards canvas coordinates", () => {
   it("contains the standard table while preserving its playing-surface ratio", () => {
-    const table = tableSpecFor("chinese-eight-ball");
+    const table = getBilliardsTableSpec("chinese-eight-ball");
     const geometry = tableGeometry(900, 450, table);
 
     expect(geometry.playWidth / geometry.playHeight).toBeCloseTo(table.width / table.height, 8);
+    expect(geometry.outerWidth / geometry.outerHeight).toBeCloseTo(
+      table.outerWidth / table.outerHeight,
+      8,
+    );
+    expect(geometry.railX / geometry.scale).toBeCloseTo((table.outerWidth - table.width) / 2, 8);
+    expect(geometry.railY / geometry.scale).toBeCloseTo((table.outerHeight - table.height) / 2, 8);
     expect(geometry.left).toBeGreaterThanOrEqual(0);
     expect(geometry.top).toBeGreaterThanOrEqual(0);
     expect(geometry.playLeft + geometry.playWidth).toBeLessThanOrEqual(900);
@@ -81,7 +92,7 @@ describe("billiards canvas coordinates", () => {
   });
 
   it("converts scaled client coordinates back to table metres", () => {
-    const table = tableSpecFor("snooker");
+    const table = getBilliardsTableSpec("snooker");
     const geometry = tableGeometry(1_000, 500, table);
     const bounds = { height: 250, left: 40, top: 30, width: 500 };
     const expected = { x: table.width * 0.25, y: table.height * 0.7 };
@@ -90,7 +101,8 @@ describe("billiards canvas coordinates", () => {
       ((geometry.playLeft + expected.x * geometry.scale) / geometry.width) * bounds.width;
     const clientY =
       bounds.top +
-      ((geometry.playTop + expected.y * geometry.scale) / geometry.height) * bounds.height;
+      ((geometry.playTop + geometry.playHeight - expected.y * geometry.scale) / geometry.height) *
+        bounds.height;
 
     expect(tablePointFromClient(clientX, clientY, bounds, geometry)).toEqual({
       x: expect.closeTo(expected.x, 8),
@@ -99,20 +111,37 @@ describe("billiards canvas coordinates", () => {
   });
 
   it.each(["chinese-eight-ball", "snooker"] as const)(
-    "draws every %s pocket at its authoritative capture circle",
+    "projects every %s mouth and capture circle from the authoritative spec",
     (mode) => {
-      const table = tableSpecFor(mode);
+      const table = getBilliardsTableSpec(mode);
       const geometry = tableGeometry(1_000, 500, table);
 
       for (const pocket of table.pockets) {
         expect(pocketCircle(geometry, pocket)).toEqual({
           radius: pocket.captureRadius * geometry.scale,
+          x: geometry.playLeft + pocket.captureX * geometry.scale,
+          y: geometry.playTop + geometry.playHeight - pocket.captureY * geometry.scale,
+        });
+        expect(pocketMouthCircle(geometry, pocket)).toEqual({
+          radius: (pocket.mouthWidth * geometry.scale) / 2,
           x: geometry.playLeft + pocket.x * geometry.scale,
-          y: geometry.playTop + pocket.y * geometry.scale,
+          y: geometry.playTop + geometry.playHeight - pocket.y * geometry.scale,
         });
       }
     },
   );
+
+  it("projects the lower-left physical origin to the lower-left of the canvas", () => {
+    const table = getBilliardsTableSpec("snooker");
+    const geometry = tableGeometry(1_000, 500, table);
+    const lowerLeft = pocketCircle(geometry, table.pockets[0]!);
+    const upperLeft = pocketCircle(geometry, table.pockets[3]!);
+
+    expect(lowerLeft.x).toBeLessThan(geometry.playLeft);
+    expect(lowerLeft.y).toBeGreaterThan(geometry.playTop + geometry.playHeight);
+    expect(upperLeft.x).toBeLessThan(geometry.playLeft);
+    expect(upperLeft.y).toBeLessThan(geometry.playTop);
+  });
 
   it("restricts behind-line cue placement to the baulk side", () => {
     const view = viewFixture({ ballInHandZone: "behind-line", phase: "ball_in_hand" });
@@ -124,16 +153,22 @@ describe("billiards canvas coordinates", () => {
     ).toBe(false);
     expect(noticeLabel(view)).toBe("母球：发球线后");
     expect(phaseLabel(view)).toBe("发球线后摆球");
-    expect(defaultCuePlacement(view)).toEqual({ x: 0.24765, y: 0.4953 });
+    expect(defaultCuePlacement(view)).toEqual({ x: 0.3175, y: 0.635 });
   });
 
   it("provides a valid keyboard starting point inside the snooker D", () => {
-    const table = tableSpecFor("snooker");
+    const table = getBilliardsTableSpec("snooker");
     const view = viewFixture({
       ballInHandZone: "d",
       mode: "snooker",
       phase: "ball_in_hand",
-      table: { ...table, pockets: [...table.pockets], spots: [...table.spots] },
+      table: {
+        ...table,
+        circularCushions: [...table.circularCushions],
+        linearCushions: [...table.linearCushions],
+        pockets: [...table.pockets],
+        spots: [...table.spots],
+      },
     });
     const point = defaultCuePlacement(view);
 
@@ -370,6 +405,7 @@ describe("billiards opponent aim preview", () => {
 function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
   const firstSeat = seatIdSchema.parse("seat-1");
   const secondSeat = seatIdSchema.parse("seat-2");
+  const table = getBilliardsTableSpec("chinese-eight-ball");
   return {
     activeSeatId: firstSeat,
     ballInHandZone: null,
@@ -396,13 +432,11 @@ function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
     shotNumber: 0,
     snookerOn: null,
     table: {
-      ballDiameter: 0.05715,
-      baulkLineX: 0.4953,
-      dRadius: null,
-      height: 0.9906,
-      pockets: [],
-      spots: [{ id: "foot", x: 1.4859, y: 0.4953 }],
-      width: 1.9812,
+      ...table,
+      circularCushions: [...table.circularCushions],
+      linearCushions: [...table.linearCushions],
+      pockets: [...table.pockets],
+      spots: [...table.spots],
     },
     viewerSeatId: firstSeat,
     ...overrides,

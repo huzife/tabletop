@@ -14,7 +14,7 @@
 本文用以下措辞区分能力边界：
 
 - **产品实现**：本仓库 Rust/WASM 核心、TypeScript 框架适配器和协议共同提供的能力。
-- **Pooltool 固定基线**：逐公式、逐参数移植固定提交的默认二维 resolver、事件选择和预制桌型；不表示 Rust 与 Python 在所有平台逐 bit 相同。
+- **Pooltool 固定基线**：逐公式移植固定提交的默认二维 resolver 与事件选择；桌型尺寸使用产品器材 profile，不表示 Rust 与 Python 在所有平台逐 bit 相同。
 - **未完整实现**：需要裁判判断、器材标定或更完整三维接触模型的已知边界，不宣称与正式赛事完全一致。
 
 ## 2. 与原框架的接入
@@ -38,7 +38,7 @@ flowchart LR
 
 主要边界如下：
 
-- `games/billiards/native/src` 是 Rust 权威核心。它导出小型 JSON/线性内存 ABI，支持 `ping`、`simulate`、`predict`、`create-match` 和 `reduce-action`，不依赖 Python 或 `wasm-bindgen` 运行时。
+- `games/billiards/native/src` 是 Rust 权威核心。它导出小型 JSON/线性内存 ABI，支持 `ping`、`table-spec`、`simulate`、`predict`、`create-match` 和 `reduce-action`，不依赖 Python 或 `wasm-bindgen` 运行时。
 - `games/billiards/physics/index.ts` 在 Node 中加载并复用单个 WASM 实例，保留同步 `simulateBilliardsShot` 接口，因此现有服务端模块不需要改成异步。
 - `games/billiards/physics/browser.ts` 按需异步获取并缓存同一 WASM，用于展示事件回放和轨迹预测。
 - 服务端先运行权威物理，再把不可变的物理摘要交给 Rust 规则 reducer；reducer 返回新的比赛状态，不读取全局状态，也不自行获取随机数。
@@ -77,7 +77,7 @@ Rust 物理核心直接按下列固定版本实现：
 | 产品确定性 | 科研模拟 API 不等于房间协议、跨端回放或联网校验方案 | 同一 WASM、稳定排序、量化、版本号、兼容 checksum 和状态 hash |
 | AI | 模拟可作为 AI/机器人研究环境，但不提供本产品的 bot 策略 | 暴露有界 `predict` 原语；搜索、选杆和风险策略仍由上层实现 |
 
-物理公式、事件类型与优先级、默认 resolver 参数、球参数和桌型几何以该固定提交为兼容目标。Rust 使用自己的确定性多项式根求解和序列化，因此只承诺在回归容差内与固定 Python 基线一致，不承诺跨语言逐 bit 相同。比赛规则、力度百分比适配、滑杆诊断、联网状态哈希和回放协议属于本产品。
+物理公式、事件类型与优先级及默认 resolver 参数以该固定提交为兼容目标；球和桌型尺寸属于产品 profile。Rust 使用自己的确定性多项式根求解和序列化，因此只承诺在回归容差内与固定 Python 基线一致，不承诺跨语言逐 bit 相同。比赛规则、器材尺寸、力度百分比适配、滑杆诊断、联网状态哈希和回放协议属于本产品。
 
 ## 4. 规则 profile
 
@@ -185,35 +185,36 @@ Rust 击球模型逐式实现 Pooltool 的球杆/球质量、球体惯量、接�
 
 | 项目 | 中式八球 | 斯诺克 |
 | --- | --- | --- |
-| 比赛区 | `1.9812 m × 0.9906 m` | `3.569 m × 1.778 m` |
-| 球径 | `0.05715 m` | `0.0523875 m` |
+| 有效比赛区（库边鼻线） | `2.540 m × 1.270 m` | `3.569 m × 1.778 m` |
+| 常用外框 | `2.830 m × 1.550 m` | `3.850 m × 2.060 m` |
+| 球径 | `0.05715 m` | `0.0525 m` |
 | 仿真球质量 | `0.170097 kg` | `0.140 kg` |
 | 发球线/D 区 | 长度的 `1/4` | 发球线 `0.737 m`，D 半径 `0.292 m` |
 | 黑球点 | 不适用 | 距顶库 `0.324 m` |
 
-中式八球直接采用 Pooltool `SEVEN_FOOT_SHOWOOD`，斯诺克采用 `SNOOKER_GENERIC`。Rust `TableGeometry` 逐式生成：
+坐标原点是开球端左下角两条库边鼻线的理论交点，`x` 沿球桌长边、`y` 沿短边。六个名义袋口位于四角及两条长库中点。Rust `TableGeometry` 逐式生成：
 
 - 18 条带方向的直线库/袋颚；
-- 12 个使用预制 corner/side jaw 半径的圆形袋角；
+- 12 个圆形袋颚；
 - 六个按 corner depth 的对角外移或 side depth 的法向外移生成的袋心；
-- Pooltool 原始袋半径作为 point-of-no-return 捕获半径；
+- 六个 point-of-no-return 捕获圆；
 - 每条直线库、圆形袋角和袋口都带静态 AABB。
 
 球球及球与几何候选先做运动 AABB 重叠测试。当前没有更复杂的 BVH，因为标准桌型的几何数量固定且较小。
 
-袋口与库边 profile 的原始参数如下（长度单位均为米，角度单位为度）：
+袋口宽度采用器材说明中的代表值。公开资料未给出制造商的完整袋口曲线模板，因此两个 profile 都使用相同的圆角袋颚与袋心深度作为明确的产品工程近似；这部分不宣称通过器材认证。参数如下（长度单位均为米，角度单位为度）：
 
 | 参数 | 中式八球 | 斯诺克 |
 | --- | ---: | ---: |
-| cushion width / height / nose radius | `0.0508 / 0.036576 / 0.005` | `0.04763 / 0.039 / 0.005` |
-| corner width / angle / depth | `0.118 / 5.3 / 0.0417` | `0.08014 / 0 / 0.06735` |
-| corner pocket / jaw radius | `0.062 / 0.02095` | `0.0889 / 0.0889` |
-| side width / angle / depth | `0.137 / 7.14 / 0.0685` | `0.08457 / 0 / 0.05159` |
-| side pocket / jaw radius | `0.0645 / 0.00795` | `0.05319 / 0.0669` |
+| cushion width / height / nose radius | `0.050 / 0.036576 / 0.005` | `0.04763 / 0.039 / 0.005` |
+| corner mouth / angle / center depth | `0.084 / 0 / 0.06735` | `0.086 / 0 / 0.06735` |
+| corner capture / jaw radius | `0.0889 / 0.0889` | `0.0889 / 0.0889` |
+| side mouth / angle / center depth | `0.088 / 0 / 0.05159` | `0.089 / 0 / 0.05159` |
+| side capture / jaw radius | `0.05319 / 0.0669` | `0.05319 / 0.0669` |
 
-Pooltool 的 `Pocket.depth` 不属于桌型 layout 参数；预制桌型创建的六个袋都保留组件默认值 `0.08 m`。这里的 corner/side depth 只负责把袋心移到比赛区之外，不能代替垂直袋深。
+Pooltool 的 `Pocket.depth` 不属于桌型 layout 参数；产品创建的六个袋保留组件默认值 `0.08 m`。这里的 corner/side center depth 只负责把捕获圆心移到比赛区之外，不能代替垂直袋深。
 
-这些参数是固定 Pooltool 预制桌型，不等同于 WPA/WPBSA 器材认证。产品不再使用原先按球径比例推导的 jaw、knuckle 或袋口 shelf 启发式。
+`table-spec` 直接从上述碰撞对象序列化名义袋位、袋口宽度、捕获圆、18 条直线库边和 12 个圆形袋颚。服务端把该对象投影到公开视图，Canvas 使用同一对象换算像素，不再维护 TypeScript 桌型常量。画面中的深色袋口按 `mouthWidth` 绘制，库边轮廓来自实际碰撞线/圆；球心进入同一对象的 `captureX/captureY/captureRadius` 后判定落袋。模式设置页中的两张尺寸图仅作器材说明，不参与坐标换算。
 
 ## 8. 参数配置与标定
 

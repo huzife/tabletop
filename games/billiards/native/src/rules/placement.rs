@@ -64,11 +64,10 @@ pub fn check_cue_placement(
         ));
     }
 
-    if table
-        .pockets
-        .iter()
-        .any(|pocket| (x - pocket.x).hypot(y - pocket.y) < pocket.capture_radius - POSITION_EPSILON)
-    {
+    if table.pockets.iter().any(|pocket| {
+        (x - pocket.capture_x).hypot(y - pocket.capture_y)
+            < pocket.capture_radius - POSITION_EPSILON
+    }) {
         return Err(RuleError::rule(
             "CUE_IN_POCKET",
             "Cue-ball placement overlaps a pocket capture area",

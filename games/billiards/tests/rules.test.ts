@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   BilliardsCoreError,
   createBilliardsCoreMatch,
+  getBilliardsTableSpec,
   reduceBilliardsCoreAction,
   simulateBilliardsShot,
 } from "../physics/index.js";
@@ -34,7 +35,6 @@ import {
   type BilliardsMode,
   type BilliardsSettings,
 } from "../shared/settings.js";
-import { tableSpecFor } from "../shared/table.js";
 import { billiardsDisplayEventSchema, billiardsViewSchema } from "../shared/view.js";
 
 const seat1 = seatIdSchema.parse("seat-1");
@@ -225,7 +225,7 @@ describe("standard billiards setups", () => {
 
   it("builds a legal deterministic Chinese eight-ball rack", () => {
     const balls = createChineseEightBallRack();
-    const table = tableSpecFor("chinese-eight-ball");
+    const table = getBilliardsTableSpec("chinese-eight-ball");
     const foot = table.spots.find(({ id }) => id === "foot");
     if (!foot) throw new Error("missing foot spot");
 
@@ -245,7 +245,7 @@ describe("standard billiards setups", () => {
 
   it("places 15 reds, six colors, and the cue ball inside the snooker D", () => {
     const balls = createSnookerRack();
-    const table = tableSpecFor("snooker");
+    const table = getBilliardsTableSpec("snooker");
     const cue = balls.find(({ kind }) => kind === "cue");
     const brown = table.spots.find(({ id }) => id === "brown");
     const pink = balls.find(({ kind }) => kind === "pink");
@@ -289,7 +289,7 @@ describe("cue-ball placement", () => {
       ballInHandZone: "anywhere",
       phase: "ball_in_hand",
     };
-    const table = tableSpecFor("chinese-eight-ball");
+    const table = getBilliardsTableSpec("chinese-eight-ball");
     const object = inHand.balls.find(({ kind }) => kind === "solid");
     if (!object) throw new Error("missing object ball");
 
@@ -318,7 +318,7 @@ describe("cue-ball placement", () => {
       ballInHandZone: "d",
       phase: "ball_in_hand",
     };
-    const table = tableSpecFor("snooker");
+    const table = getBilliardsTableSpec("snooker");
     const line = table.baulkLineX;
     if (line === null || table.dRadius === null) throw new Error("missing D");
 
@@ -333,7 +333,7 @@ describe("cue-ball placement", () => {
 
   it("limits a Heyball opening or break-foul cue ball to behind the baulk line", () => {
     const inHand = state("chinese-eight-ball");
-    const table = tableSpecFor("chinese-eight-ball");
+    const table = getBilliardsTableSpec("chinese-eight-ball");
     const line = table.baulkLineX;
     if (line === null) throw new Error("missing baulk line");
 
@@ -797,7 +797,7 @@ describe("snooker rules", () => {
       simulation: simulation(red.state, { first: "black", potted: ["black"] }),
       state: red.state,
     });
-    const blackSpot = tableSpecFor("snooker").spots.find(({ id }) => id === "black");
+    const blackSpot = getBilliardsTableSpec("snooker").spots.find(({ id }) => id === "black");
     const blackBall = black.state.balls.find(({ kind }) => kind === "black");
     expect(black).toMatchObject({ points: 7, state: { activeSeatId: seat1, snookerOn: "red" } });
     expect(black.state.players.find(({ seatId }) => seatId === seat1)?.score).toBe(8);
@@ -807,7 +807,7 @@ describe("snooker rules", () => {
 
   it("does not respot a color on top of the cue ball", () => {
     const initial = readyToShoot(state("snooker"));
-    const blackSpot = tableSpecFor("snooker").spots.find(({ id }) => id === "black");
+    const blackSpot = getBilliardsTableSpec("snooker").spots.find(({ id }) => id === "black");
     if (!blackSpot) throw new Error("missing black spot");
     const colorOn: BilliardsMatchState = {
       ...initial,
@@ -829,7 +829,7 @@ describe("snooker rules", () => {
     expect(cue).toBeDefined();
     expect(black).toBeDefined();
     expect(Math.hypot(black!.x - cue!.x, black!.y - cue!.y)).toBeGreaterThanOrEqual(
-      tableSpecFor("snooker").ballDiameter - 1e-9,
+      getBilliardsTableSpec("snooker").ballDiameter - 1e-9,
     );
   });
 
@@ -1003,7 +1003,7 @@ describe("snooker rules", () => {
 
   it("marks a cue resting on the black spot in hand before respotting a tied final black", () => {
     const initial = withSnookerScores(readyToShoot(state("snooker")), 43, 50);
-    const blackSpot = tableSpecFor("snooker").spots.find(({ id }) => id === "black");
+    const blackSpot = getBilliardsTableSpec("snooker").spots.find(({ id }) => id === "black");
     if (!blackSpot) throw new Error("missing black spot");
     const finalBlack: BilliardsMatchState = {
       ...initial,
@@ -1393,7 +1393,7 @@ describe("authoritative action permissions", () => {
     expect(parsedLegacyEvent).not.toHaveProperty("spinConvergence");
     expect(parsedLegacyEvent).not.toHaveProperty("tableFriction");
     expect(event).toHaveProperty("initialBalls");
-    expect(event.physicsVersion).toBe("pooltool-9a8abfe-rs-v1");
+    expect(event.physicsVersion).toBe("tabletop-billiards-size-v2");
     expect(event.simulationStateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(event).not.toHaveProperty("spinConvergence");
     expect(event).not.toHaveProperty("tableFriction");

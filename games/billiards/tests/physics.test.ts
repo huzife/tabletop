@@ -4,10 +4,10 @@ import type { BilliardsShot } from "../shared/actions.js";
 import type { BilliardsBall } from "../shared/view.js";
 import {
   getBilliardsCoreInfo,
+  getBilliardsTableSpec,
   predictBilliardsTrajectory,
   simulateBilliardsShot,
 } from "../physics/index.js";
-import { tableSpecFor } from "../shared/table.js";
 
 function ball(id: string, kind: BilliardsBall["kind"], x: number, y: number): BilliardsBall {
   return {
@@ -34,33 +34,46 @@ function shot(overrides: Partial<BilliardsShot> = {}): BilliardsShot {
 }
 
 const mode = "chinese-eight-ball" as const;
-const centreY = 0.9906 / 2;
+const centreY = 1.27 / 2;
 
 describe("Pooltool-compatible billiards core", () => {
-  it("publishes the exact Pooltool prebuilt table and pocket parameters", () => {
-    const pool = tableSpecFor(mode);
+  it("publishes the supplied table, ball, mouth and capture dimensions", () => {
+    const pool = getBilliardsTableSpec(mode);
     expect(pool).toMatchObject({
       ballDiameter: 0.05715,
       ballMass: 0.170097,
-      height: 0.9906,
-      width: 1.9812,
+      height: 1.27,
+      outerHeight: 1.55,
+      outerWidth: 2.83,
+      width: 2.54,
     });
-    expect(pool.pockets.map(({ captureRadius }) => captureRadius)).toEqual([
-      0.062, 0.0645, 0.062, 0.062, 0.0645, 0.062,
+    expect(pool.pockets.map(({ mouthWidth }) => mouthWidth)).toEqual([
+      0.084, 0.088, 0.084, 0.084, 0.088, 0.084,
     ]);
-    expect(pool.pockets[0]).toMatchObject({
-      x: -0.0417 / Math.sqrt(2),
-      y: -0.0417 / Math.sqrt(2),
+    expect(pool.pockets.map(({ captureRadius }) => captureRadius)).toEqual([
+      0.0889, 0.05319, 0.0889, 0.0889, 0.05319, 0.0889,
+    ]);
+    expect(pool.pockets[0]).toMatchObject({ x: 0, y: 0 });
+    expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.06735 / Math.sqrt(2), 12);
+    expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.06735 / Math.sqrt(2), 12);
+    expect(pool.pockets[1]).toMatchObject({
+      captureX: 2.54 / 2,
+      captureY: -0.05159,
+      x: 2.54 / 2,
+      y: 0,
     });
-    expect(pool.pockets[1]).toMatchObject({ x: 1.9812 / 2, y: -0.0685 });
 
-    const snooker = tableSpecFor("snooker");
+    const snooker = getBilliardsTableSpec("snooker");
     expect(snooker).toMatchObject({
-      ballDiameter: 0.0523875,
+      ballDiameter: 0.0525,
       ballMass: 0.14,
       height: 1.778,
+      outerHeight: 2.06,
+      outerWidth: 3.85,
       width: 3.569,
     });
+    expect(snooker.pockets[0]?.mouthWidth).toBe(0.086);
+    expect(snooker.pockets[1]?.mouthWidth).toBe(0.089);
     expect(snooker.pockets[0]?.captureRadius).toBe(0.0889);
     expect(snooker.pockets[1]?.captureRadius).toBe(0.05319);
   });
@@ -95,7 +108,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("pooltool-9a8abfe-rs-v1");
+    expect(first.physicsVersion).toBe("tabletop-billiards-size-v2");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -168,16 +181,49 @@ describe("Pooltool-compatible billiards core", () => {
       mode,
       shot: shot({ angle: -Math.PI * 0.75, power: 35 }),
     });
-    const corner = tableSpecFor(mode).pockets[0]!;
+    const corner = getBilliardsTableSpec(mode).pockets[0]!;
 
     expect(result.pocketedBallIds).toEqual(["cue"]);
     expect(result.cueBallPotted).toBe(true);
     expect(result.balls[0]).toMatchObject({
       pocketed: true,
-      x: Number(corner.x.toFixed(6)),
-      y: Number(corner.y.toFixed(6)),
+      x: Number(corner.captureX.toFixed(6)),
+      y: Number(corner.captureY.toFixed(6)),
     });
   });
+
+  it.each(["chinese-eight-ball", "snooker"] as const)(
+    "accepts a centre-line approach through all six %s mouths",
+    (tableMode) => {
+      const table = getBilliardsTableSpec(tableMode);
+      for (const pocket of table.pockets) {
+        const towardCentreX =
+          pocket.kind === "side" ? 0 : pocket.x === 0 ? Math.SQRT1_2 : -Math.SQRT1_2;
+        const towardCentreY =
+          pocket.kind === "side"
+            ? pocket.y === 0
+              ? 1
+              : -1
+            : pocket.y === 0
+              ? Math.SQRT1_2
+              : -Math.SQRT1_2;
+        const length = Math.hypot(towardCentreX, towardCentreY);
+        const startX = pocket.x + (towardCentreX / length) * 0.24;
+        const startY = pocket.y + (towardCentreY / length) * 0.24;
+        const angle = Math.atan2(pocket.captureY - startY, pocket.captureX - startX);
+        const result = simulateBilliardsShot({
+          balls: [ball("cue", "cue", startX, startY)],
+          mode: tableMode,
+          shot: shot({ angle, power: 35 }),
+        });
+
+        expect(result.pocketedBallIds, pocket.id).toEqual(["cue"]);
+        expect(result.balls[0]?.pocketed, pocket.id).toBe(true);
+        expect(result.balls[0]?.x, pocket.id).toBeCloseTo(pocket.captureX, 6);
+        expect(result.balls[0]?.y, pocket.id).toBeCloseTo(pocket.captureY, 6);
+      }
+    },
+  );
 
   it("uses the snooker ball and cloth parameter set", () => {
     const centre = 1.778 / 2;

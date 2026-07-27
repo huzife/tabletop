@@ -134,7 +134,7 @@ fn serde_models_match_the_existing_wire_contract() {
 }
 
 #[test]
-fn initial_racks_and_match_states_match_the_typescript_layout() {
+fn initial_racks_and_match_states_follow_the_native_table_profile() {
     let chinese = create_chinese_eight_ball_rack().expect("Chinese rack");
     assert_eq!(chinese.len(), 16);
     assert_eq!(
@@ -211,7 +211,7 @@ fn cue_placement_checks_bounds_zones_pockets_and_overlap() {
         table.ball_diameter / 2.0,
         None,
     )
-    .expect("Pooltool's pocket point-of-no-return lies beyond the corner shelf");
+    .expect("the pocket point-of-no-return lies beyond the corner shelf");
     let object = anywhere
         .balls
         .iter()

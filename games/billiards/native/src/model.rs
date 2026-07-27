@@ -1,7 +1,7 @@
 use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "pooltool-9a8abfe-rs-v1";
+pub const PHYSICS_VERSION: &str = "tabletop-billiards-size-v2";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BilliardsMode {
@@ -197,11 +197,15 @@ pub struct BallParameters {
     pub gravity: f64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PocketSpec {
+    pub id: String,
     pub capture_radius: f64,
+    pub capture_x: f64,
+    pub capture_y: f64,
     pub kind: PocketKind,
+    pub mouth_width: f64,
     pub x: f64,
     pub y: f64,
 }
@@ -223,15 +227,39 @@ pub struct SpotSpec {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct LinearCushionSpec {
+    pub id: String,
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CircularCushionSpec {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub radius: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TableSpec {
     pub mode: BilliardsMode,
     pub width: f64,
     pub height: f64,
+    pub outer_width: f64,
+    pub outer_height: f64,
+    pub cushion_width: f64,
     pub ball_diameter: f64,
     pub ball_mass: f64,
     pub baulk_line_x: Option<f64>,
     pub d_radius: Option<f64>,
     pub pockets: Vec<PocketSpec>,
+    pub linear_cushions: Vec<LinearCushionSpec>,
+    pub circular_cushions: Vec<CircularCushionSpec>,
     pub spots: Vec<SpotSpec>,
 }
 

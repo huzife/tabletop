@@ -6,17 +6,32 @@ export type CanvasBall = BilliardsBall & { readonly z?: number };
 
 type CanvasTableSpec = Pick<
   BilliardsTableSpec,
-  "ballDiameter" | "baulkLineX" | "dRadius" | "height" | "pockets" | "spots" | "width"
+  | "ballDiameter"
+  | "baulkLineX"
+  | "circularCushions"
+  | "cushionWidth"
+  | "dRadius"
+  | "height"
+  | "linearCushions"
+  | "outerHeight"
+  | "outerWidth"
+  | "pockets"
+  | "spots"
+  | "width"
 >;
 
 export interface TableGeometry {
   readonly height: number;
   readonly left: number;
+  readonly outerHeight: number;
+  readonly outerWidth: number;
   readonly playHeight: number;
   readonly playLeft: number;
   readonly playTop: number;
   readonly playWidth: number;
   readonly rail: number;
+  readonly railX: number;
+  readonly railY: number;
   readonly scale: number;
   readonly top: number;
   readonly width: number;
@@ -36,29 +51,36 @@ export interface PocketCircle {
 export function tableGeometry(
   canvasWidth: number,
   canvasHeight: number,
-  table: Pick<BilliardsTableSpec, "height" | "width" | "ballDiameter">,
+  table: Pick<BilliardsTableSpec, "height" | "outerHeight" | "outerWidth" | "width">,
 ): TableGeometry {
   const safeWidth = Math.max(1, canvasWidth);
   const safeHeight = Math.max(1, canvasHeight);
-  const rail = Math.max(table.ballDiameter * 2.05, Math.min(table.width, table.height) * 0.08);
+  const outerWidthMetres = Math.max(table.width, table.outerWidth);
+  const outerHeightMetres = Math.max(table.height, table.outerHeight);
   const scale = Math.min(
-    Math.max(1, safeWidth - 12) / (table.width + rail * 2),
-    Math.max(1, safeHeight - 12) / (table.height + rail * 2),
+    Math.max(1, safeWidth - 12) / outerWidthMetres,
+    Math.max(1, safeHeight - 12) / outerHeightMetres,
   );
   const playWidth = table.width * scale;
   const playHeight = table.height * scale;
-  const outerWidth = playWidth + rail * scale * 2;
-  const outerHeight = playHeight + rail * scale * 2;
+  const outerWidth = outerWidthMetres * scale;
+  const outerHeight = outerHeightMetres * scale;
+  const railX = ((outerWidthMetres - table.width) * scale) / 2;
+  const railY = ((outerHeightMetres - table.height) * scale) / 2;
   const left = (safeWidth - outerWidth) / 2;
   const top = (safeHeight - outerHeight) / 2;
   return {
     height: safeHeight,
     left,
+    outerHeight,
+    outerWidth,
     playHeight,
-    playLeft: left + rail * scale,
-    playTop: top + rail * scale,
+    playLeft: left + railX,
+    playTop: top + railY,
     playWidth,
-    rail: rail * scale,
+    rail: Math.min(railX, railY),
+    railX,
+    railY,
     scale,
     top,
     width: safeWidth,
@@ -80,20 +102,31 @@ export function tablePointFromClient(
   const localY = ((clientY - bounds.top) / Math.max(1, bounds.height)) * geometry.height;
   return {
     x: (localX - geometry.playLeft) / geometry.scale,
-    y: (localY - geometry.playTop) / geometry.scale,
+    y: (geometry.playTop + geometry.playHeight - localY) / geometry.scale,
   };
 }
 
 export function pocketCircle(
-  geometry: Pick<TableGeometry, "playLeft" | "playTop" | "scale">,
+  geometry: Pick<TableGeometry, "playHeight" | "playLeft" | "playTop" | "scale">,
   pocket: TablePocketSpec,
 ): PocketCircle {
   // This is the authoritative ball-centre point-of-no-return circle, so it
   // must not be shifted or enlarged for presentation.
   return {
     radius: pocket.captureRadius * geometry.scale,
+    x: geometry.playLeft + pocket.captureX * geometry.scale,
+    y: tableY(geometry, pocket.captureY),
+  };
+}
+
+export function pocketMouthCircle(
+  geometry: Pick<TableGeometry, "playHeight" | "playLeft" | "playTop" | "scale">,
+  pocket: TablePocketSpec,
+): PocketCircle {
+  return {
+    radius: (pocket.mouthWidth * geometry.scale) / 2,
     x: geometry.playLeft + pocket.x * geometry.scale,
-    y: geometry.playTop + pocket.y * geometry.scale,
+    y: tableY(geometry, pocket.y),
   };
 }
 
@@ -112,24 +145,25 @@ export function drawBilliardsTable(
     readonly placementValid?: boolean;
   },
 ): void {
-  const { playHeight, playLeft, playTop, playWidth, rail, scale } = geometry;
+  const { playLeft, scale } = geometry;
   context.clearRect(0, 0, geometry.width, geometry.height);
   context.fillStyle = "#e9eeeb";
   context.fillRect(0, 0, geometry.width, geometry.height);
 
   drawOuterTable(context, geometry, mode);
-  drawMarkings(context, geometry, table, mode);
 
   const radius = (table.ballDiameter * scale) / 2;
   for (const pocket of table.pockets) {
-    const circle = pocketCircle(geometry, pocket);
+    const circle = pocketMouthCircle(geometry, pocket);
     drawPocket(context, circle.x, circle.y, circle.radius);
   }
+  drawMarkings(context, geometry, table, mode);
+  drawCushionGeometry(context, geometry, table, mode);
 
   if (options.placementPoint !== undefined) {
     const point = options.placementPoint;
     const px = playLeft + point.x * scale;
-    const py = playTop + point.y * scale;
+    const py = tableY(geometry, point.y);
     context.save();
     context.globalAlpha = 0.82;
     context.setLineDash([5, 4]);
@@ -144,7 +178,7 @@ export function drawBilliardsTable(
 
   for (const ball of balls) {
     if (ball.pocketed) continue;
-    drawBall(context, ball, playLeft, playTop, scale, radius);
+    drawBall(context, ball, geometry, radius);
   }
 
   const cueBall = balls.find((ball) => ball.kind === "cue" && !ball.pocketed);
@@ -158,8 +192,7 @@ function drawOuterTable(
   geometry: TableGeometry,
   mode: BilliardsMode,
 ): void {
-  const outerWidth = geometry.playWidth + geometry.rail * 2;
-  const outerHeight = geometry.playHeight + geometry.rail * 2;
+  const { outerHeight, outerWidth } = geometry;
   const wood = context.createLinearGradient(
     geometry.left,
     geometry.top,
@@ -230,6 +263,42 @@ function drawOuterTable(
   drawRailDiamonds(context, geometry, mode);
 }
 
+function drawCushionGeometry(
+  context: CanvasRenderingContext2D,
+  geometry: TableGeometry,
+  table: Pick<CanvasTableSpec, "circularCushions" | "linearCushions">,
+  mode: BilliardsMode,
+): void {
+  context.save();
+  context.beginPath();
+  context.rect(geometry.playLeft, geometry.playTop, geometry.playWidth, geometry.playHeight);
+  context.clip();
+  context.strokeStyle = mode === "snooker" ? "rgb(226 239 214 / 62%)" : "rgb(214 239 248 / 62%)";
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.lineWidth = Math.max(1, geometry.scale * 0.006);
+  context.beginPath();
+  for (const cushion of table.linearCushions) {
+    context.moveTo(geometry.playLeft + cushion.x1 * geometry.scale, tableY(geometry, cushion.y1));
+    context.lineTo(geometry.playLeft + cushion.x2 * geometry.scale, tableY(geometry, cushion.y2));
+  }
+  for (const cushion of table.circularCushions) {
+    context.moveTo(
+      geometry.playLeft + (cushion.x + cushion.radius) * geometry.scale,
+      tableY(geometry, cushion.y),
+    );
+    context.arc(
+      geometry.playLeft + cushion.x * geometry.scale,
+      tableY(geometry, cushion.y),
+      cushion.radius * geometry.scale,
+      0,
+      Math.PI * 2,
+    );
+  }
+  context.stroke();
+  context.restore();
+}
+
 function drawRailDiamonds(
   context: CanvasRenderingContext2D,
   geometry: TableGeometry,
@@ -296,7 +365,7 @@ function drawMarkings(
     context.beginPath();
     context.arc(
       playLeft + spot.x * scale,
-      playTop + spot.y * scale,
+      playTop + playHeight - spot.y * scale,
       Math.max(1.5, scale * 0.012),
       0,
       Math.PI * 2,
@@ -332,15 +401,15 @@ function drawPocket(context: CanvasRenderingContext2D, x: number, y: number, rad
 function drawBall(
   context: CanvasRenderingContext2D,
   ball: CanvasBall,
-  playLeft: number,
-  playTop: number,
-  scale: number,
+  geometry: TableGeometry,
   radius: number,
 ): void {
+  const { playLeft, scale } = geometry;
   const z = typeof ball.z === "number" && Number.isFinite(ball.z) ? Math.max(0, ball.z) : 0;
   const x = playLeft + ball.x * scale;
-  const y = playTop + ball.y * scale - Math.min(0.25, z) * scale;
-  const shadowY = playTop + ball.y * scale + radius * 0.72;
+  const surfaceY = tableY(geometry, ball.y);
+  const y = surfaceY - Math.min(0.25, z) * scale;
+  const shadowY = surfaceY + radius * 0.72;
   context.save();
   context.fillStyle = "rgb(14 18 17 / 34%)";
   context.beginPath();
@@ -424,7 +493,7 @@ function drawAim(
 ): void {
   const radius = (ballDiameter * geometry.scale) / 2;
   const x = geometry.playLeft + cueBall.x * geometry.scale;
-  const y = geometry.playTop + cueBall.y * geometry.scale;
+  const y = tableY(geometry, cueBall.y);
   const directionX = Math.cos(angle);
   const directionY = Math.sin(angle);
   const boundaryDistance = distanceToTableBoundary(
@@ -442,10 +511,10 @@ function drawAim(
   context.lineWidth = Math.max(1, geometry.scale * 0.006);
   context.setLineDash([7, 6]);
   context.beginPath();
-  context.moveTo(x + directionX * radius, y + directionY * radius);
+  context.moveTo(x + directionX * radius, y - directionY * radius);
   context.lineTo(
     geometry.playLeft + (cueBall.x + directionX * endpoint) * geometry.scale,
-    geometry.playTop + (cueBall.y + directionY * endpoint) * geometry.scale,
+    tableY(geometry, cueBall.y + directionY * endpoint),
   );
   context.stroke();
   context.setLineDash([]);
@@ -455,7 +524,7 @@ function drawAim(
     context.beginPath();
     context.arc(
       geometry.playLeft + (cueBall.x + directionX * target.contactDistance) * geometry.scale,
-      geometry.playTop + (cueBall.y + directionY * target.contactDistance) * geometry.scale,
+      tableY(geometry, cueBall.y + directionY * target.contactDistance),
       radius * 0.74,
       0,
       Math.PI * 2,
@@ -493,7 +562,7 @@ function drawCue(
   scale: number,
 ): void {
   const dirX = Math.cos(angle);
-  const dirY = Math.sin(angle);
+  const dirY = -Math.sin(angle);
   const projection = 0.36 + Math.cos((elevation * Math.PI) / 180) * 0.64;
   const tipDistance = radius * 1.22;
   const length = Math.max(radius * 4, scale * 0.72) * projection;
@@ -579,6 +648,13 @@ function distanceToTableBoundary(
         ? -y / directionY
         : Number.POSITIVE_INFINITY;
   return Math.max(0, Math.min(tx, ty));
+}
+
+function tableY(
+  geometry: Pick<TableGeometry, "playHeight" | "playTop" | "scale">,
+  y: number,
+): number {
+  return geometry.playTop + geometry.playHeight - y * geometry.scale;
 }
 
 function ballBaseColor(ball: CanvasBall): string {

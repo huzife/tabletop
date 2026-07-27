@@ -1,4 +1,5 @@
-use crate::model::{PredictShotInput, SimulateShotInput};
+use crate::geometry::table_spec;
+use crate::model::{BilliardsMode, PredictShotInput, SimulateShotInput};
 use crate::physics::{predict_shot, simulate_shot};
 use crate::rules::{
     BilliardsAction, BilliardsMatchState, BilliardsSettings, BilliardsSimulationResult,
@@ -29,6 +30,9 @@ pub enum CoreRequest {
         simulation: Option<BilliardsSimulationResult>,
         #[serde(default)]
         deciding_black_chooser_index: usize,
+    },
+    TableSpec {
+        mode: BilliardsMode,
     },
     Ping,
 }
@@ -138,6 +142,7 @@ pub fn process_json(input: &[u8]) -> Vec<u8> {
             Ok(adjudication) => CoreResponse::success(adjudication),
             Err(error) => CoreResponse::failure(error.into()),
         },
+        Ok(CoreRequest::TableSpec { mode }) => CoreResponse::success(table_spec(mode)),
         Ok(CoreRequest::Ping) => CoreResponse::success(serde_json::json!({
             "physicsVersion": crate::model::PHYSICS_VERSION,
             "rulesVersion": crate::rules::RULES_VERSION,

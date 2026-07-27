@@ -6,6 +6,7 @@ import {
   bindBilliardsCore,
   createBilliardsMatchStateWithCore,
   getBilliardsCoreInfoWithCore,
+  getBilliardsTableSpecWithCore,
   predictBilliardsTrajectoryWithCore,
   reduceBilliardsActionWithCore,
   simulateBilliardsShotWithCore,
@@ -19,7 +20,8 @@ import type {
   SimulateBilliardsShotInput,
 } from "./types.js";
 import type { BilliardsAction } from "../shared/actions.js";
-import type { BilliardsSettings } from "../shared/settings.js";
+import type { BilliardsMode, BilliardsSettings } from "../shared/settings.js";
+import type { BilliardsTableSpec } from "../shared/table.js";
 import type {
   AdjudicatedBilliardsShot,
   BilliardsMatchState,
@@ -92,6 +94,17 @@ export function predictBilliardsTrajectory(
 /** Returns the deterministic physics protocol version embedded in the core. */
 export function getBilliardsCoreInfo(): BilliardsCoreInfo {
   return getBilliardsCoreInfoWithCore(core);
+}
+
+const tableSpecs = new Map<BilliardsMode, BilliardsTableSpec>();
+
+/** Returns the table geometry serialized by the authoritative Rust core. */
+export function getBilliardsTableSpec(mode: BilliardsMode): BilliardsTableSpec {
+  const cached = tableSpecs.get(mode);
+  if (cached !== undefined) return cached;
+  const table = getBilliardsTableSpecWithCore(core, mode);
+  tableSpecs.set(mode, table);
+  return table;
 }
 
 /** Creates a match through the pure Rust rules reducer. */

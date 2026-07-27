@@ -5,11 +5,11 @@ import { GameRuleError } from "@tabletop/game-sdk/server";
 import {
   BilliardsCoreError,
   createBilliardsCoreMatch,
+  getBilliardsTableSpec,
   reduceBilliardsCoreAction,
   simulateBilliardsShot,
 } from "../physics/index.js";
 import type { BilliardsAction } from "../shared/actions.js";
-import { tableSpecFor } from "../shared/table.js";
 import type { BilliardsDisplayEvent, BilliardsView } from "../shared/view.js";
 import type {
   BilliardsEndReason,
@@ -290,7 +290,7 @@ export function projectBilliardsView(
   state: Readonly<BilliardsMatchState>,
   viewer: ViewerV1,
 ): BilliardsView {
-  const table = tableSpecFor(state.settings.mode);
+  const table = getBilliardsTableSpec(state.settings.mode);
   const viewerSeatId = viewer.kind === "player" ? viewer.seatId : null;
   const viewerIsPlayer = viewer.kind === "player" && state.seatIds.includes(viewer.seatId);
   const viewerIsCurrent = viewer.kind === "player" && viewer.seatId === state.activeSeatId;
@@ -345,9 +345,16 @@ export function projectBilliardsView(
     snookerOn: state.snookerOn,
     table: {
       ballDiameter: table.ballDiameter,
+      ballMass: table.ballMass,
       baulkLineX: table.baulkLineX,
+      circularCushions: table.circularCushions.map((cushion) => ({ ...cushion })),
+      cushionWidth: table.cushionWidth,
       dRadius: table.dRadius,
       height: table.height,
+      linearCushions: table.linearCushions.map((cushion) => ({ ...cushion })),
+      mode: table.mode,
+      outerHeight: table.outerHeight,
+      outerWidth: table.outerWidth,
       pockets: table.pockets.map((pocket) => ({ ...pocket })),
       spots: table.spots.map((spot) => ({ ...spot })),
       width: table.width,

@@ -1156,7 +1156,8 @@ export function isCuePlacementValid(
     return false;
   if (
     table.pockets.some(
-      (pocket) => Math.hypot(point.x - pocket.x, point.y - pocket.y) < pocket.captureRadius,
+      (pocket) =>
+        Math.hypot(point.x - pocket.captureX, point.y - pocket.captureY) < pocket.captureRadius,
     )
   )
     return false;

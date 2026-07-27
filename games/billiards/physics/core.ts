@@ -11,7 +11,8 @@ import type {
   SimulateBilliardsShotInput,
 } from "./types.js";
 import type { BilliardsAction } from "../shared/actions.js";
-import type { BilliardsSettings } from "../shared/settings.js";
+import type { BilliardsMode, BilliardsSettings } from "../shared/settings.js";
+import type { BilliardsTableSpec } from "../shared/table.js";
 import type {
   AdjudicatedBilliardsShot,
   BilliardsMatchState,
@@ -39,6 +40,10 @@ type BilliardsCoreRequest =
   | {
       readonly input: SimulateBilliardsShotInput;
       readonly op: "simulate";
+    }
+  | {
+      readonly mode: BilliardsMode;
+      readonly op: "table-spec";
     }
   | {
       readonly op: "ping";
@@ -94,6 +99,13 @@ export function predictBilliardsTrajectoryWithCore(
 
 export function getBilliardsCoreInfoWithCore(core: BilliardsCore): BilliardsCoreInfo {
   return requestCore(core, { op: "ping" });
+}
+
+export function getBilliardsTableSpecWithCore(
+  core: BilliardsCore,
+  mode: BilliardsMode,
+): BilliardsTableSpec {
+  return requestCore(core, { mode, op: "table-spec" });
 }
 
 export function createBilliardsMatchStateWithCore(

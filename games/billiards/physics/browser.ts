@@ -1,6 +1,7 @@
 import {
   bindBilliardsCore,
   getBilliardsCoreInfoWithCore,
+  getBilliardsTableSpecWithCore,
   predictBilliardsTrajectoryWithCore,
   simulateBilliardsShotWithCore,
   type BilliardsCore,
@@ -12,6 +13,8 @@ import type {
   ShotSimulationResult,
   SimulateBilliardsShotInput,
 } from "./types.js";
+import type { BilliardsMode } from "../shared/settings.js";
+import type { BilliardsTableSpec } from "../shared/table.js";
 
 export * from "./types.js";
 
@@ -62,4 +65,10 @@ export async function predictBilliardsTrajectory(
 export async function getBilliardsCoreInfo(): Promise<BilliardsCoreInfo> {
   const core = await getBilliardsCore();
   return getBilliardsCoreInfoWithCore(core);
+}
+
+/** Returns the table geometry serialized by the authoritative Rust core. */
+export async function getBilliardsTableSpec(mode: BilliardsMode): Promise<BilliardsTableSpec> {
+  const core = await getBilliardsCore();
+  return getBilliardsTableSpecWithCore(core, mode);
 }
