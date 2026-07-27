@@ -41,6 +41,11 @@ import {
   type CanvasBall,
   type TablePoint,
 } from "./canvas.js";
+import {
+  drawChineseEightBallScene,
+  loadChineseEightBallScene,
+  type LoadedChineseEightBallScene,
+} from "./table-scene.js";
 
 const SNOOKER_COLORS: readonly { readonly label: string; readonly value: SnookerColor }[] = [
   { label: "黄", value: "yellow" },
@@ -464,6 +469,7 @@ function BilliardsCanvas({
     typeof window === "undefined" ? 1 : Math.max(1, window.devicePixelRatio || 1),
   );
   const [hoverPoint, setHoverPoint] = useState<TablePoint | undefined>();
+  const [tableScene, setTableScene] = useState<LoadedChineseEightBallScene | undefined>();
   const pointerRef = useRef<{ id: number; mode: "aim" | "place" } | null>(null);
   const geometry = useMemo(
     () => tableGeometry(size.width, size.height, table),
@@ -472,6 +478,24 @@ function BilliardsCanvas({
   const cueRadius = table.ballDiameter / 2;
   const placementValid =
     hoverPoint === undefined ? false : isCuePlacementValid(hoverPoint, view, cueRadius);
+
+  useEffect(() => {
+    if (mode !== "chinese-eight-ball") {
+      setTableScene(undefined);
+      return undefined;
+    }
+    let active = true;
+    void loadChineseEightBallScene()
+      .then((scene) => {
+        if (active) setTableScene(scene);
+      })
+      .catch(() => {
+        // Keep the procedural table as a resilient fallback if an asset cannot be loaded.
+      });
+    return () => {
+      active = false;
+    };
+  }, [mode]);
 
   useEffect(() => {
     if (!placementEnabled) {
@@ -534,6 +558,14 @@ function BilliardsCanvas({
     drawBilliardsTable(context, geometry, table, mode, balls, aimAngle, elevation, tip, {
       aimEnabled: aimVisible,
       placementValid,
+      ...(tableScene === undefined
+        ? {}
+        : {
+            drawTableBackground: (
+              drawContext: CanvasRenderingContext2D,
+              drawGeometry: typeof geometry,
+            ) => drawChineseEightBallScene(drawContext, drawGeometry, tableScene),
+          }),
       ...(placementEnabled && hoverPoint !== undefined ? { placementPoint: hoverPoint } : {}),
     });
   }, [
@@ -550,6 +582,7 @@ function BilliardsCanvas({
     pixelRatio,
     size,
     table,
+    tableScene,
     tip,
   ]);
 

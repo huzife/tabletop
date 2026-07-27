@@ -1393,7 +1393,7 @@ describe("authoritative action permissions", () => {
     expect(parsedLegacyEvent).not.toHaveProperty("spinConvergence");
     expect(parsedLegacyEvent).not.toHaveProperty("tableFriction");
     expect(event).toHaveProperty("initialBalls");
-    expect(event.physicsVersion).toBe("tabletop-billiards-size-v2");
+    expect(event.physicsVersion).toBe("tabletop-billiards-scene-v3");
     expect(event.simulationStateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(event).not.toHaveProperty("spinConvergence");
     expect(event).not.toHaveProperty("tableFriction");

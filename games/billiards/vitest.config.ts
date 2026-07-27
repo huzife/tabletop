@@ -20,6 +20,9 @@ export default defineConfig({
       "@tabletop/protocol": fileURLToPath(
         new URL("../../packages/protocol/src/index.ts", import.meta.url),
       ),
+      "@tabletop/scene": fileURLToPath(
+        new URL("../../packages/scene/src/index.ts", import.meta.url),
+      ),
       "@tabletop/ui": fileURLToPath(new URL("../../packages/ui/src/index.ts", import.meta.url)),
     },
   },

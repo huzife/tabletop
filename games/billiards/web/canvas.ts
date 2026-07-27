@@ -141,6 +141,10 @@ export function drawBilliardsTable(
   tip: { readonly x: number; readonly y: number },
   options: {
     readonly aimEnabled: boolean;
+    readonly drawTableBackground?: (
+      context: CanvasRenderingContext2D,
+      geometry: TableGeometry,
+    ) => boolean;
     readonly placementPoint?: TablePoint;
     readonly placementValid?: boolean;
   },
@@ -150,15 +154,18 @@ export function drawBilliardsTable(
   context.fillStyle = "#e9eeeb";
   context.fillRect(0, 0, geometry.width, geometry.height);
 
-  drawOuterTable(context, geometry, mode);
+  const sceneBackgroundDrawn = options.drawTableBackground?.(context, geometry) === true;
 
   const radius = (table.ballDiameter * scale) / 2;
-  for (const pocket of table.pockets) {
-    const circle = pocketMouthCircle(geometry, pocket);
-    drawPocket(context, circle.x, circle.y, circle.radius);
+  if (!sceneBackgroundDrawn) {
+    drawOuterTable(context, geometry, mode);
+    for (const pocket of table.pockets) {
+      const circle = pocketMouthCircle(geometry, pocket);
+      drawPocket(context, circle.x, circle.y, circle.radius);
+    }
+    drawCushionGeometry(context, geometry, table, mode);
   }
   drawMarkings(context, geometry, table, mode);
-  drawCushionGeometry(context, geometry, table, mode);
 
   if (options.placementPoint !== undefined) {
     const point = options.placementPoint;

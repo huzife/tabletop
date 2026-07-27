@@ -1,0 +1,418 @@
+{
+  "format": "tabletop.scene",
+  "formatVersion": 1,
+  "name": "中式八球球桌",
+  "canvas": {
+    "width": 1280,
+    "height": 720,
+    "background": "#f8fafc",
+    "gridSize": 20,
+    "coordinateSystem": {
+      "origin": "top-left",
+      "xAxis": "right",
+      "yAxis": "down",
+      "unit": "scene-unit"
+    },
+    "scaleMode": "contain"
+  },
+  "elements": [
+    {
+      "id": "chinese-eight-ball-table-background",
+      "name": "chinese-eight-ball-table-top-view.png",
+      "role": "visual",
+      "visible": true,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "none",
+        "fillOpacity": 0,
+        "stroke": "#94a3b8",
+        "strokeOpacity": 0.8,
+        "strokeWidth": 1,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "球桌背景",
+        "notes": "",
+        "tags": []
+      },
+      "type": "image",
+      "x": 0,
+      "y": 0,
+      "width": 1280,
+      "height": 720,
+      "source": "./chinese-eight-ball-table-top-view.png",
+      "alt": "中式八球球桌俯视图",
+      "fit": "contain"
+    },
+    {
+      "id": "hole-top-left",
+      "name": "hole",
+      "role": "collision",
+      "visible": false,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#5b6ff5",
+        "fillOpacity": 0.18,
+        "stroke": "#4353c7",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "左上球洞",
+        "notes": "",
+        "tags": []
+      },
+      "type": "ellipse",
+      "cx": 70,
+      "cy": 70,
+      "rx": 30,
+      "ry": 30
+    },
+    {
+      "id": "hole-top-right",
+      "name": "hole",
+      "role": "collision",
+      "visible": false,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#5b6ff5",
+        "fillOpacity": 0.18,
+        "stroke": "#4353c7",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "右上球洞",
+        "notes": "",
+        "tags": []
+      },
+      "type": "ellipse",
+      "cx": 1210,
+      "cy": 70,
+      "rx": 30,
+      "ry": 30
+    },
+    {
+      "id": "hole-bottom-left",
+      "name": "hole",
+      "role": "collision",
+      "visible": false,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#5b6ff5",
+        "fillOpacity": 0.18,
+        "stroke": "#4353c7",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "左下球洞",
+        "notes": "",
+        "tags": []
+      },
+      "type": "ellipse",
+      "cx": 70,
+      "cy": 650,
+      "rx": 30,
+      "ry": 30
+    },
+    {
+      "id": "hole-bottom-right",
+      "name": "hole",
+      "role": "collision",
+      "visible": false,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#5b6ff5",
+        "fillOpacity": 0.18,
+        "stroke": "#4353c7",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "右下球洞",
+        "notes": "",
+        "tags": []
+      },
+      "type": "ellipse",
+      "cx": 1210,
+      "cy": 650,
+      "rx": 30,
+      "ry": 30
+    },
+    {
+      "id": "hole-top-center",
+      "name": "hole",
+      "role": "collision",
+      "visible": false,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#5b6ff5",
+        "fillOpacity": 0.18,
+        "stroke": "#4353c7",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "上方中袋",
+        "notes": "",
+        "tags": []
+      },
+      "type": "ellipse",
+      "cx": 639.184549356223,
+      "cy": 59.52789699570803,
+      "rx": 30,
+      "ry": 30
+    },
+    {
+      "id": "hole-bottom-center",
+      "name": "hole",
+      "role": "collision",
+      "visible": false,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#5b6ff5",
+        "fillOpacity": 0.18,
+        "stroke": "#4353c7",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "下方中袋",
+        "notes": "",
+        "tags": []
+      },
+      "type": "ellipse",
+      "cx": 639.2703862660944,
+      "cy": 659.0128755364807,
+      "rx": 30,
+      "ry": 30
+    },
+    {
+      "id": "boundary",
+      "name": "boundary",
+      "role": "collision",
+      "visible": false,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#5b6ff5",
+        "fillOpacity": 0.18,
+        "stroke": "#4353c7",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "球台碰撞边界",
+        "notes": "",
+        "tags": []
+      },
+      "type": "polyline",
+      "points": [
+        {
+          "x": 123.94849785407723,
+          "y": 86.52360515021451
+        },
+        {
+          "x": 589.0128755364806,
+          "y": 86.52360515021451
+        },
+        {
+          "x": 610.6437768240341,
+          "y": 66.4377682403433
+        },
+        {
+          "x": 612.1888412017167,
+          "y": 46.351931330471984
+        },
+        {
+          "x": 633.8197424892703,
+          "y": 32.446351931330355
+        },
+        {
+          "x": 666.2660944206007,
+          "y": 41.716738197424775
+        },
+        {
+          "x": 667.8111587982833,
+          "y": 57.16738197424888
+        },
+        {
+          "x": 683.2618025751071,
+          "y": 84.97854077253214
+        },
+        {
+          "x": 1151.4163090128752,
+          "y": 86.52360515021451
+        },
+        {
+          "x": 1200.8583690987123,
+          "y": 40.17167381974241
+        },
+        {
+          "x": 1236.3948497854078,
+          "y": 43.261802575107254
+        },
+        {
+          "x": 1248.7553648068667,
+          "y": 78.79828326180245
+        },
+        {
+          "x": 1216.3090128755364,
+          "y": 111.24463519313292
+        },
+        {
+          "x": 1196.223175965665,
+          "y": 131.33047210300424
+        },
+        {
+          "x": 1197.7682403433475,
+          "y": 590.214592274678
+        },
+        {
+          "x": 1220.9442060085837,
+          "y": 619.5708154506436
+        },
+        {
+          "x": 1247.2103004291846,
+          "y": 636.5665236051501
+        },
+        {
+          "x": 1239.4849785407725,
+          "y": 679.8283261802575
+        },
+        {
+          "x": 1199.3133047210301,
+          "y": 684.4635193133046
+        },
+        {
+          "x": 1180.7725321888413,
+          "y": 659.742489270386
+        },
+        {
+          "x": 1156.0515021459225,
+          "y": 636.5665236051501
+        },
+        {
+          "x": 686.3519313304721,
+          "y": 635.0214592274677
+        },
+        {
+          "x": 666.2660944206007,
+          "y": 661.2875536480686
+        },
+        {
+          "x": 663.1759656652359,
+          "y": 686.0085836909869
+        },
+        {
+          "x": 621.4592274678112,
+          "y": 690.6437768240343
+        },
+        {
+          "x": 610.6437768240341,
+          "y": 669.0128755364805
+        },
+        {
+          "x": 607.5536480686694,
+          "y": 655.107296137339
+        },
+        {
+          "x": 592.1030042918453,
+          "y": 635.0214592274677
+        },
+        {
+          "x": 123.94849785407723,
+          "y": 635.0214592274677
+        },
+        {
+          "x": 99.2274678111587,
+          "y": 659.742489270386
+        },
+        {
+          "x": 68.32618025751071,
+          "y": 686.0085836909869
+        },
+        {
+          "x": 32.7896995708154,
+          "y": 664.3776824034334
+        },
+        {
+          "x": 35.87982832618013,
+          "y": 631.9313304721028
+        },
+        {
+          "x": 54.42060085836897,
+          "y": 618.0257510729613
+        },
+        {
+          "x": 80.68669527896986,
+          "y": 594.8497854077251
+        },
+        {
+          "x": 79.1416309012875,
+          "y": 131.33047210300424
+        },
+        {
+          "x": 57.51072961373393,
+          "y": 100.42918454935614
+        },
+        {
+          "x": 31.244635193133036,
+          "y": 74.16309012875524
+        },
+        {
+          "x": 45.15021459227455,
+          "y": 44.80686695278962
+        },
+        {
+          "x": 80.68669527896986,
+          "y": 40.17167381974241
+        },
+        {
+          "x": 102.31759656652343,
+          "y": 61.80257510729609
+        }
+      ],
+      "closed": true
+    }
+  ]
+}

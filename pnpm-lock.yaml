@@ -118,6 +118,49 @@ importers:
         specifier: 'catalog:'
         version: 5.9.3
 
+  apps/scene-editor:
+    dependencies:
+      '@tabletop/scene':
+        specifier: workspace:*
+        version: link:../../packages/scene
+      lucide-react:
+        specifier: 'catalog:'
+        version: 0.536.0(react@19.2.7)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.7
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.7(react@19.2.7)
+    devDependencies:
+      '@testing-library/jest-dom':
+        specifier: catalog:testing
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: catalog:testing
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 5.2.0(vite@7.3.6(@types/node@22.20.1)(lightningcss@1.32.0)(tsx@4.23.1))
+      jsdom:
+        specifier: catalog:testing
+        version: 26.1.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vite:
+        specifier: 'catalog:'
+        version: 7.3.6(@types/node@22.20.1)(lightningcss@1.32.0)(tsx@4.23.1)
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(jsdom@26.1.0)(vite@7.3.6(@types/node@22.20.1)(lightningcss@1.32.0)(tsx@4.23.1))
+
   apps/server:
     dependencies:
       '@fastify/cookie':
@@ -251,6 +294,9 @@ importers:
       '@tabletop/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@tabletop/scene':
+        specifier: workspace:*
+        version: link:../../packages/scene
       '@tabletop/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -427,6 +473,22 @@ importers:
         version: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(jsdom@26.1.0)(vite@8.1.4(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.1))
 
   packages/protocol:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.1
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(jsdom@26.1.0)(vite@8.1.4(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.1))
+
+  packages/scene:
     dependencies:
       zod:
         specifier: 'catalog:'
@@ -3300,7 +3362,7 @@ snapshots:
       obug: 2.1.3
       std-env: 4.2.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(jsdom@26.1.0)(vite@8.1.4(@types/node@22.20.1)(esbuild@0.28.1)(tsx@4.23.1))
+      vitest: 4.1.10(@types/node@22.20.1)(@vitest/coverage-v8@4.1.10)(jsdom@26.1.0)(vite@7.3.6(@types/node@22.20.1)(lightningcss@1.32.0)(tsx@4.23.1))
 
   '@vitest/expect@4.1.10':
     dependencies:

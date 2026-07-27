@@ -48,6 +48,10 @@ games/<game-id>/
 
 `shared` 只能放浏览器可以安全获得的内容；完整权威状态定义放在 `server`。大型素材放在游戏自己的 `web/assets`，经 Vite 构建并使用内容哈希缓存。
 
+需要共同设计视觉元素和碰撞几何时，可以使用仓库的
+[2D 场景与碰撞区编辑器](scene-editor.md)导出 `tabletop.scene/v1` 描述文件，
+并通过 `@tabletop/scene` 在游戏中使用同一套坐标变换、Canvas 绘制和命中检测。
+
 仓库已经提供不进入游戏注册表的 `games/template`。模板包含独立 package exports、最小 manifest、共享设置/动作/视图 schema、服务端状态迁移、浏览器设置与视图组件以及宿主适配器测试；复制模板后必须替换 package 名、导出符号、动作命名空间和 `gameId`。模板本身不注册为可玩的游戏。
 
 ## 3. Manifest 与能力声明

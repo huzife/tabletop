@@ -1,0 +1,210 @@
+{
+  "format": "tabletop.scene",
+  "formatVersion": 1,
+  "name": "示例游戏场景",
+  "canvas": {
+    "width": 1280,
+    "height": 720,
+    "background": "#f8fafc",
+    "gridSize": 20,
+    "coordinateSystem": {
+      "origin": "top-left",
+      "xAxis": "right",
+      "yAxis": "down",
+      "unit": "scene-unit"
+    },
+    "scaleMode": "contain"
+  },
+  "elements": [
+    {
+      "id": "board-background",
+      "name": "棋盘背景",
+      "role": "visual",
+      "visible": true,
+      "locked": true,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#dbeafe",
+        "fillOpacity": 1,
+        "stroke": "#64748b",
+        "strokeOpacity": 1,
+        "strokeWidth": 2,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "游戏区域",
+        "notes": "视觉底板，不参与碰撞",
+        "tags": ["board", "visual"]
+      },
+      "type": "rectangle",
+      "x": 140,
+      "y": 80,
+      "width": 1000,
+      "height": 560,
+      "cornerRadius": 32
+    },
+    {
+      "id": "board-texture",
+      "name": "棋盘纹理",
+      "role": "visual",
+      "visible": true,
+      "locked": false,
+      "opacity": 0.9,
+      "rotation": 0,
+      "style": {
+        "fill": "none",
+        "fillOpacity": 0,
+        "stroke": "#94a3b8",
+        "strokeOpacity": 0,
+        "strokeWidth": 0,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "",
+        "notes": "source 相对场景描述文件解析",
+        "tags": ["texture"]
+      },
+      "type": "image",
+      "x": 180,
+      "y": 120,
+      "width": 920,
+      "height": 480,
+      "source": "./assets/board-texture.png",
+      "alt": "棋盘纹理",
+      "fit": "cover"
+    },
+    {
+      "id": "spawn-zone",
+      "name": "出生区",
+      "role": "both",
+      "visible": true,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#22c55e",
+        "fillOpacity": 0.2,
+        "stroke": "#15803d",
+        "strokeOpacity": 1,
+        "strokeWidth": 3,
+        "dash": [10, 6],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "P1 出生点",
+        "notes": "角色中心进入椭圆时触发出生区逻辑",
+        "tags": ["spawn", "player-1"]
+      },
+      "type": "ellipse",
+      "cx": 330,
+      "cy": 360,
+      "rx": 90,
+      "ry": 70
+    },
+    {
+      "id": "wall-top",
+      "name": "上边界",
+      "role": "collision",
+      "visible": true,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#ef4444",
+        "fillOpacity": 0.15,
+        "stroke": "#dc2626",
+        "strokeOpacity": 1,
+        "strokeWidth": 4,
+        "dash": [8, 5],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "不可通行",
+        "notes": "碰撞矩形",
+        "tags": ["wall"]
+      },
+      "type": "rectangle",
+      "x": 180,
+      "y": 120,
+      "width": 920,
+      "height": 32,
+      "cornerRadius": 8
+    },
+    {
+      "id": "movement-guide",
+      "name": "移动引导",
+      "role": "visual",
+      "visible": true,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "none",
+        "fillOpacity": 0,
+        "stroke": "#4f46e5",
+        "strokeOpacity": 1,
+        "strokeWidth": 5,
+        "dash": [10, 6],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "推荐路线",
+        "notes": "",
+        "tags": ["guide"]
+      },
+      "type": "line",
+      "start": {
+        "x": 430,
+        "y": 360
+      },
+      "end": {
+        "x": 800,
+        "y": 360
+      },
+      "arrowStart": false,
+      "arrowEnd": true
+    },
+    {
+      "id": "scene-title",
+      "name": "场景标题",
+      "role": "visual",
+      "visible": true,
+      "locked": false,
+      "opacity": 1,
+      "rotation": 0,
+      "style": {
+        "fill": "#172033",
+        "fillOpacity": 1,
+        "stroke": "none",
+        "strokeOpacity": 0,
+        "strokeWidth": 0,
+        "dash": [],
+        "lineCap": "round",
+        "lineJoin": "round"
+      },
+      "metadata": {
+        "label": "",
+        "notes": "视觉文字",
+        "tags": ["ui", "title"]
+      },
+      "type": "text",
+      "x": 640,
+      "y": 24,
+      "text": "示例游戏场景",
+      "fontFamily": "Inter, system-ui, sans-serif",
+      "fontSize": 32,
+      "fontWeight": "bold",
+      "lineHeight": 1.2,
+      "align": "center",
+      "maxWidth": 420
+    }
+  ]
+}

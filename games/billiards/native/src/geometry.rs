@@ -3,6 +3,12 @@ use crate::model::{
     BilliardsMode, CircularCushionSpec, LinearCushionSpec, PocketKind, PocketSpec, SpotSpec,
     TableSpec,
 };
+use serde::Deserialize;
+use std::sync::OnceLock;
+
+const CHINESE_EIGHT_BALL_SCENE_JSON: &str =
+    include_str!("../../web/assets/chinese-eight-ball-table.json");
+const POOLTOOL_POCKET_DEPTH: f64 = 0.08;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Aabb {
@@ -116,6 +122,39 @@ impl LinearCushion {
         }
     }
 
+    fn from_boundary(
+        id: String,
+        p1: Vec2,
+        p2: Vec2,
+        height: f64,
+        nose_radius: f64,
+        clockwise: bool,
+    ) -> Self {
+        let edge = p2 - p1;
+        let length = edge.length();
+        let inward = if clockwise {
+            Vec2::new(edge.y, -edge.x)
+        } else {
+            Vec2::new(-edge.y, edge.x)
+        } * (1.0 / length);
+        let p1 = Vec3::new(p1.x, p1.y, height);
+        let p2 = Vec3::new(p2.x, p2.y, height);
+        Self {
+            id,
+            p1,
+            p2,
+            nose_radius,
+            direction: CushionDirection::Side2,
+            lx: inward.x,
+            ly: inward.y,
+            l0: -inward.dot(p1.xy()),
+            aabb: Aabb {
+                minimum: Vec2::new(p1.x.min(p2.x), p1.y.min(p2.y)),
+                maximum: Vec2::new(p1.x.max(p2.x), p1.y.max(p2.y)),
+            },
+        }
+    }
+
     pub fn contains_projection(&self, point: Vec2) -> bool {
         let edge = self.p2.xy() - self.p1.xy();
         let denominator = edge.length_squared();
@@ -165,6 +204,107 @@ pub(crate) struct PocketGeometry {
     pub depth: f64,
     pub aabb: Aabb,
 }
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+struct ScenePoint {
+    x: f64,
+    y: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SceneCoordinateSystem {
+    origin: String,
+    x_axis: String,
+    y_axis: String,
+    unit: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SceneCanvas {
+    width: f64,
+    height: f64,
+    coordinate_system: SceneCoordinateSystem,
+    scale_mode: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+enum SceneElement {
+    #[serde(rename = "ellipse")]
+    Ellipse {
+        name: String,
+        role: String,
+        rotation: f64,
+        cx: f64,
+        cy: f64,
+        rx: f64,
+        ry: f64,
+    },
+    #[serde(rename = "polyline")]
+    Polyline {
+        name: String,
+        role: String,
+        rotation: f64,
+        points: Vec<ScenePoint>,
+        closed: bool,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SceneDocument {
+    format: String,
+    format_version: u32,
+    canvas: SceneCanvas,
+    elements: Vec<SceneElement>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SceneEllipse {
+    center: ScenePoint,
+    rx: f64,
+    ry: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SceneCalibration {
+    left: f64,
+    right: f64,
+    top: f64,
+    bottom: f64,
+}
+
+impl SceneCalibration {
+    fn scale_x(self, table_width: f64) -> f64 {
+        table_width / (self.right - self.left)
+    }
+
+    fn scale_y(self, table_height: f64) -> f64 {
+        table_height / (self.bottom - self.top)
+    }
+
+    fn to_table(self, point: ScenePoint, table_width: f64, table_height: f64) -> Vec2 {
+        Vec2::new(
+            (point.x - self.left) * self.scale_x(table_width),
+            (self.bottom - point.y) * self.scale_y(table_height),
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ChineseEightBallScene {
+    canvas_width: f64,
+    canvas_height: f64,
+    boundary: Vec<ScenePoint>,
+    holes: Vec<SceneEllipse>,
+    calibration: SceneCalibration,
+}
+
+static CHINESE_EIGHT_BALL_SCENE: OnceLock<ChineseEightBallScene> = OnceLock::new();
 
 #[derive(Clone, Copy)]
 struct PocketTableParameters {
@@ -243,6 +383,9 @@ pub(crate) struct TableGeometry {
 impl TableGeometry {
     pub fn for_mode(mode: BilliardsMode) -> Self {
         let parameters = PocketTableParameters::for_mode(mode);
+        if mode == BilliardsMode::ChineseEightBall {
+            return create_chinese_eight_ball_geometry(parameters, chinese_eight_ball_scene());
+        }
         let linear_cushions = create_linear_cushions(parameters);
         let circular_cushions = create_circular_cushions(parameters);
         let pockets = create_pockets(parameters);
@@ -259,6 +402,242 @@ impl TableGeometry {
             circular_cushions,
             pockets,
         }
+    }
+}
+
+fn chinese_eight_ball_scene() -> &'static ChineseEightBallScene {
+    CHINESE_EIGHT_BALL_SCENE.get_or_init(|| {
+        parse_chinese_eight_ball_scene(CHINESE_EIGHT_BALL_SCENE_JSON)
+            .expect("bundled Chinese eight-ball scene must be valid")
+    })
+}
+
+fn parse_chinese_eight_ball_scene(json: &str) -> Result<ChineseEightBallScene, String> {
+    let document: SceneDocument =
+        serde_json::from_str(json).map_err(|error| format!("invalid scene JSON: {error}"))?;
+    if document.format != "tabletop.scene" || document.format_version != 1 {
+        return Err("scene must use tabletop.scene/v1".to_owned());
+    }
+    let coordinates = &document.canvas.coordinate_system;
+    if coordinates.origin != "top-left"
+        || coordinates.x_axis != "right"
+        || coordinates.y_axis != "down"
+        || coordinates.unit != "scene-unit"
+        || document.canvas.scale_mode != "contain"
+    {
+        return Err("scene coordinate system must be top-left/right/down scene units".to_owned());
+    }
+    if document.canvas.width <= 0.0 || document.canvas.height <= 0.0 {
+        return Err("scene canvas dimensions must be positive".to_owned());
+    }
+
+    let mut boundary = None;
+    let mut holes = Vec::new();
+    for element in document.elements {
+        match element {
+            SceneElement::Polyline {
+                name,
+                role,
+                rotation,
+                points,
+                closed,
+            } if name == "boundary" && role != "visual" => {
+                if boundary.is_some() {
+                    return Err("scene must contain exactly one boundary polyline".to_owned());
+                }
+                if !closed || rotation != 0.0 || points.len() < 3 {
+                    return Err(
+                        "boundary must be an unrotated closed polyline with at least 3 points"
+                            .to_owned(),
+                    );
+                }
+                boundary = Some(points);
+            }
+            SceneElement::Ellipse {
+                name,
+                role,
+                rotation,
+                cx,
+                cy,
+                rx,
+                ry,
+            } if name == "hole" && role != "visual" => {
+                if rotation != 0.0 || rx <= 0.0 || ry <= 0.0 {
+                    return Err("holes must be unrotated ellipses with positive radii".to_owned());
+                }
+                holes.push(SceneEllipse {
+                    center: ScenePoint { x: cx, y: cy },
+                    rx,
+                    ry,
+                });
+            }
+            _ => {}
+        }
+    }
+    let boundary =
+        boundary.ok_or_else(|| "scene is missing the boundary collision polyline".to_owned())?;
+    if holes.len() != 6 {
+        return Err(format!(
+            "scene must contain exactly 6 collision ellipses named hole, found {}",
+            holes.len()
+        ));
+    }
+    let calibration =
+        derive_scene_calibration(&boundary, document.canvas.width, document.canvas.height)?;
+    Ok(ChineseEightBallScene {
+        canvas_width: document.canvas.width,
+        canvas_height: document.canvas.height,
+        boundary,
+        holes,
+        calibration,
+    })
+}
+
+fn derive_scene_calibration(
+    boundary: &[ScenePoint],
+    canvas_width: f64,
+    canvas_height: f64,
+) -> Result<SceneCalibration, String> {
+    let mut horizontal_levels = Vec::new();
+    let mut vertical_extents = Vec::new();
+    for index in 0..boundary.len() {
+        let first = boundary[index];
+        let second = boundary[(index + 1) % boundary.len()];
+        let dx = second.x - first.x;
+        let dy = second.y - first.y;
+        if dy.abs() <= 1.0e-9 && dx.abs() >= canvas_width * 0.25 {
+            horizontal_levels.push(first.y);
+        }
+        if dx.abs() <= canvas_width * 0.01 && dy.abs() >= canvas_height * 0.25 {
+            vertical_extents.extend([first.x, second.x]);
+        }
+    }
+    if horizontal_levels.len() < 2 || vertical_extents.len() < 4 {
+        return Err(
+            "boundary must contain the long straight cushion edges used for calibration".to_owned(),
+        );
+    }
+    let top = horizontal_levels
+        .iter()
+        .copied()
+        .min_by(f64::total_cmp)
+        .unwrap();
+    let bottom = horizontal_levels
+        .iter()
+        .copied()
+        .max_by(f64::total_cmp)
+        .unwrap();
+    let left = vertical_extents
+        .iter()
+        .copied()
+        .min_by(f64::total_cmp)
+        .unwrap();
+    let right = vertical_extents
+        .iter()
+        .copied()
+        .max_by(f64::total_cmp)
+        .unwrap();
+    if right - left <= EPSILON || bottom - top <= EPSILON {
+        return Err("boundary calibration has zero width or height".to_owned());
+    }
+    Ok(SceneCalibration {
+        left,
+        right,
+        top,
+        bottom,
+    })
+}
+
+fn create_chinese_eight_ball_geometry(
+    parameters: PocketTableParameters,
+    scene: &ChineseEightBallScene,
+) -> TableGeometry {
+    let boundary = scene
+        .boundary
+        .iter()
+        .map(|point| {
+            scene
+                .calibration
+                .to_table(*point, parameters.l, parameters.w)
+        })
+        .collect::<Vec<_>>();
+    let signed_area = boundary
+        .iter()
+        .zip(boundary.iter().cycle().skip(1))
+        .map(|(first, second)| first.x * second.y - second.x * first.y)
+        .sum::<f64>()
+        * 0.5;
+    let clockwise = signed_area < 0.0;
+    let linear_cushions = boundary
+        .iter()
+        .copied()
+        .zip(boundary.iter().copied().cycle().skip(1))
+        .enumerate()
+        .filter_map(|(index, (first, second))| {
+            if (second - first).length_squared() <= EPSILON {
+                return None;
+            }
+            Some(LinearCushion::from_boundary(
+                format!("scene-{index:02}"),
+                first,
+                second,
+                parameters.cushion_height,
+                parameters.cushion_nose_radius,
+                clockwise,
+            ))
+        })
+        .collect::<Vec<_>>();
+    let circular_cushions = Vec::new();
+    let scale_x = scene.calibration.scale_x(parameters.l);
+    let scale_y = scene.calibration.scale_y(parameters.w);
+    let mut holes = scene
+        .holes
+        .iter()
+        .map(|hole| {
+            let center = scene
+                .calibration
+                .to_table(hole.center, parameters.l, parameters.w);
+            // The existing physics contract uses circular capture basins. Preserve
+            // the authored ellipse's mean physical radius when X/Y scales differ.
+            (center, (hole.rx * scale_x + hole.ry * scale_y) * 0.5)
+        })
+        .collect::<Vec<_>>();
+    holes.sort_by(|first, second| first.0.y.total_cmp(&second.0.y));
+    holes[..3].sort_by(|first, second| first.0.x.total_cmp(&second.0.x));
+    holes[3..].sort_by(|first, second| first.0.x.total_cmp(&second.0.x));
+    let ids = ["lb", "lc", "lt", "rb", "rc", "rt"];
+    let pockets = holes
+        .into_iter()
+        .zip(ids)
+        .map(|((center, radius), id)| {
+            let center = Vec3::new(center.x, center.y, 0.0);
+            PocketGeometry {
+                id: id.to_owned(),
+                center,
+                radius,
+                depth: POOLTOOL_POCKET_DEPTH,
+                aabb: Aabb::around(center.xy(), radius),
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut table = build_table_spec(
+        BilliardsMode::ChineseEightBall,
+        parameters,
+        &linear_cushions,
+        &circular_cushions,
+        &pockets,
+    );
+    let left_margin = scene.calibration.left * scale_x;
+    let right_margin = (scene.canvas_width - scene.calibration.right) * scale_x;
+    let top_margin = scene.calibration.top * scale_y;
+    let bottom_margin = (scene.canvas_height - scene.calibration.bottom) * scale_y;
+    table.outer_width = parameters.l + 2.0 * left_margin.max(right_margin);
+    table.outer_height = parameters.w + 2.0 * top_margin.max(bottom_margin);
+    TableGeometry {
+        table,
+        linear_cushions,
+        circular_cushions,
+        pockets,
     }
 }
 
@@ -429,7 +808,6 @@ fn create_pockets(specs: PocketTableParameters) -> Vec<PocketGeometry> {
     // `Pocket.depth` is not part of the table layout specs in Pooltool. Every
     // pocket created by `create_pocket_table_pockets` therefore keeps the
     // canonical component default.
-    const POOLTOOL_POCKET_DEPTH: f64 = 0.08;
     let corner_depth = specs.corner_pocket_depth * std::f64::consts::FRAC_1_SQRT_2;
     let source = [
         (
@@ -663,8 +1041,12 @@ mod tests {
     fn published_table_geometry_is_the_collision_geometry() {
         for mode in [BilliardsMode::ChineseEightBall, BilliardsMode::Snooker] {
             let geometry = TableGeometry::for_mode(mode);
-            assert_eq!(geometry.linear_cushions.len(), 18);
-            assert_eq!(geometry.circular_cushions.len(), 12);
+            let (linear_count, circular_count) = match mode {
+                BilliardsMode::ChineseEightBall => (41, 0),
+                BilliardsMode::Snooker => (18, 12),
+            };
+            assert_eq!(geometry.linear_cushions.len(), linear_count);
+            assert_eq!(geometry.circular_cushions.len(), circular_count);
             assert_eq!(geometry.pockets.len(), 6);
 
             for (collision, published) in geometry
@@ -702,8 +1084,8 @@ mod tests {
         let chinese = table_spec(BilliardsMode::ChineseEightBall);
         close(chinese.width, 2.540);
         close(chinese.height, 1.270);
-        close(chinese.outer_width, 2.830);
-        close(chinese.outer_height, 1.550);
+        close(chinese.outer_width, 2.913_437_691_835_482_3);
+        close(chinese.outer_height, 1.670_676_056_338_027_8);
         close(chinese.ball_diameter, 0.057_15);
         close(chinese.pockets[0].x, 0.0);
         close(chinese.pockets[0].y, 0.0);
@@ -711,8 +1093,12 @@ mod tests {
         close(chinese.pockets[1].x, 1.270);
         close(chinese.pockets[1].y, 0.0);
         close(chinese.pockets[1].mouth_width, 0.088);
-        close(chinese.pockets[0].capture_radius, 0.088_9);
-        close(chinese.pockets[1].capture_radius, 0.053_19);
+        close(chinese.pockets[0].capture_x, -0.020_757_366_482_504_48);
+        close(chinese.pockets[0].capture_y, -0.034_681_533_646_322_53);
+        close(chinese.pockets[1].capture_x, 1.271_851_596_071_209_6);
+        close(chinese.pockets[1].capture_y, -0.055_550_078_247_261_51);
+        close(chinese.pockets[0].capture_radius, 0.068_790_843_125_048_63);
+        close(chinese.pockets[1].capture_radius, 0.068_790_843_125_048_63);
 
         let snooker = table_spec(BilliardsMode::Snooker);
         close(snooker.width, 3.569);
@@ -733,5 +1119,18 @@ mod tests {
                 .x,
             3.245,
         );
+    }
+
+    #[test]
+    fn bundled_chinese_scene_has_the_expected_collision_contract() {
+        let scene = parse_chinese_eight_ball_scene(CHINESE_EIGHT_BALL_SCENE_JSON).unwrap();
+        assert_eq!(scene.boundary.len(), 41);
+        assert_eq!(scene.holes.len(), 6);
+        close(scene.canvas_width, 1280.0);
+        close(scene.canvas_height, 720.0);
+        close(scene.calibration.left, 79.141_630_901_287_5);
+        close(scene.calibration.right, 1_197.768_240_343_347_5);
+        close(scene.calibration.top, 86.523_605_150_214_51);
+        close(scene.calibration.bottom, 635.021_459_227_467_7);
     }
 }

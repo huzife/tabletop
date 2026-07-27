@@ -14,6 +14,7 @@
     "check:native": "pnpm -r --if-present check:native",
     "predev": "pnpm --filter @tabletop/game-billiards build:native",
     "dev": "pnpm --parallel --filter @tabletop/server --filter @tabletop/web dev",
+    "dev:scene": "pnpm --filter @tabletop/scene-editor dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "pnpm -r --if-present test",

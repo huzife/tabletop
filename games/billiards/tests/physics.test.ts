@@ -43,22 +43,22 @@ describe("Pooltool-compatible billiards core", () => {
       ballDiameter: 0.05715,
       ballMass: 0.170097,
       height: 1.27,
-      outerHeight: 1.55,
-      outerWidth: 2.83,
+      outerHeight: 1.6706760563380278,
+      outerWidth: 2.9134376918354823,
       width: 2.54,
     });
     expect(pool.pockets.map(({ mouthWidth }) => mouthWidth)).toEqual([
       0.084, 0.088, 0.084, 0.084, 0.088, 0.084,
     ]);
-    expect(pool.pockets.map(({ captureRadius }) => captureRadius)).toEqual([
-      0.0889, 0.05319, 0.0889, 0.0889, 0.05319, 0.0889,
-    ]);
+    for (const pocket of pool.pockets) {
+      expect(pocket.captureRadius).toBeCloseTo(0.06879084312504863, 12);
+    }
     expect(pool.pockets[0]).toMatchObject({ x: 0, y: 0 });
-    expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.06735 / Math.sqrt(2), 12);
-    expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.06735 / Math.sqrt(2), 12);
+    expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.02075736648250448, 12);
+    expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.03468153364632253, 12);
     expect(pool.pockets[1]).toMatchObject({
-      captureX: 2.54 / 2,
-      captureY: -0.05159,
+      captureX: 1.2718515960712096,
+      captureY: -0.05555007824726151,
       x: 2.54 / 2,
       y: 0,
     });
@@ -108,7 +108,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-size-v2");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v3");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -173,6 +173,9 @@ describe("Pooltool-compatible billiards core", () => {
         .filter(({ kind }) => kind === "ball_cushion")
         .every(({ geometryId }) => typeof geometryId === "string"),
     ).toBe(true);
+    expect(result.events.find(({ kind }) => kind === "ball_cushion")?.geometryId).toMatch(
+      /^scene-\d{2}$/,
+    );
   });
 
   it("places a potted ball at Pooltool's canonical pocket centre", () => {
@@ -185,11 +188,9 @@ describe("Pooltool-compatible billiards core", () => {
 
     expect(result.pocketedBallIds).toEqual(["cue"]);
     expect(result.cueBallPotted).toBe(true);
-    expect(result.balls[0]).toMatchObject({
-      pocketed: true,
-      x: Number(corner.captureX.toFixed(6)),
-      y: Number(corner.captureY.toFixed(6)),
-    });
+    expect(result.balls[0]?.pocketed).toBe(true);
+    expect(result.balls[0]?.x).toBeCloseTo(Number(corner.captureX.toFixed(6)), 12);
+    expect(result.balls[0]?.y).toBeCloseTo(Number(corner.captureY.toFixed(6)), 12);
   });
 
   it.each(["chinese-eight-ball", "snooker"] as const)(

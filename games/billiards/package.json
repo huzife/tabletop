@@ -46,6 +46,7 @@
   "dependencies": {
     "@tabletop/game-sdk": "workspace:*",
     "@tabletop/protocol": "workspace:*",
+    "@tabletop/scene": "workspace:*",
     "@tabletop/ui": "workspace:*",
     "lucide-react": "catalog:",
     "react": "catalog:",

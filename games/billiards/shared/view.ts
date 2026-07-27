@@ -47,60 +47,85 @@ const playerSchema = z.strictObject({
   seatId: seatIdSchema,
 });
 
-const tableViewSchema = z.strictObject({
-  ballDiameter: z.number().finite().positive(),
-  ballMass: z.number().finite().positive(),
-  baulkLineX: z.number().finite().nonnegative().nullable(),
-  circularCushions: z
-    .array(
+const tableViewSchema = z
+  .strictObject({
+    ballDiameter: z.number().finite().positive(),
+    ballMass: z.number().finite().positive(),
+    baulkLineX: z.number().finite().nonnegative().nullable(),
+    circularCushions: z
+      .array(
+        z.strictObject({
+          id: z.string().min(1).max(16),
+          radius: z.number().finite().positive(),
+          x: z.number().finite(),
+          y: z.number().finite(),
+        }),
+      )
+      .max(64),
+    cushionWidth: z.number().finite().positive(),
+    dRadius: z.number().finite().positive().nullable(),
+    height: z.number().finite().positive(),
+    linearCushions: z
+      .array(
+        z.strictObject({
+          id: z.string().min(1).max(16),
+          x1: z.number().finite(),
+          x2: z.number().finite(),
+          y1: z.number().finite(),
+          y2: z.number().finite(),
+        }),
+      )
+      .max(4096),
+    mode: billiardsModeSchema,
+    outerHeight: z.number().finite().positive(),
+    outerWidth: z.number().finite().positive(),
+    pockets: z
+      .array(
+        z.strictObject({
+          captureX: z.number().finite(),
+          captureY: z.number().finite(),
+          captureRadius: z.number().finite().positive(),
+          id: z.string().min(1).max(16),
+          kind: z.enum(["corner", "side"]),
+          mouthWidth: z.number().finite().positive(),
+          x: z.number().finite(),
+          y: z.number().finite(),
+        }),
+      )
+      .length(6),
+    spots: z.array(
       z.strictObject({
         id: z.string().min(1).max(16),
-        radius: z.number().finite().positive(),
-        x: z.number().finite(),
-        y: z.number().finite(),
+        x: z.number().finite().nonnegative(),
+        y: z.number().finite().nonnegative(),
       }),
-    )
-    .length(12),
-  cushionWidth: z.number().finite().positive(),
-  dRadius: z.number().finite().positive().nullable(),
-  height: z.number().finite().positive(),
-  linearCushions: z
-    .array(
-      z.strictObject({
-        id: z.string().min(1).max(16),
-        x1: z.number().finite(),
-        x2: z.number().finite(),
-        y1: z.number().finite(),
-        y2: z.number().finite(),
-      }),
-    )
-    .length(18),
-  mode: billiardsModeSchema,
-  outerHeight: z.number().finite().positive(),
-  outerWidth: z.number().finite().positive(),
-  pockets: z
-    .array(
-      z.strictObject({
-        captureX: z.number().finite(),
-        captureY: z.number().finite(),
-        captureRadius: z.number().finite().positive(),
-        id: z.string().min(1).max(16),
-        kind: z.enum(["corner", "side"]),
-        mouthWidth: z.number().finite().positive(),
-        x: z.number().finite(),
-        y: z.number().finite(),
-      }),
-    )
-    .length(6),
-  spots: z.array(
-    z.strictObject({
-      id: z.string().min(1).max(16),
-      x: z.number().finite().nonnegative(),
-      y: z.number().finite().nonnegative(),
-    }),
-  ),
-  width: z.number().finite().positive(),
-});
+    ),
+    width: z.number().finite().positive(),
+  })
+  .superRefine((table, context) => {
+    const expectedCircular = table.mode === "chinese-eight-ball" ? 0 : 12;
+    if (table.circularCushions.length !== expectedCircular) {
+      context.addIssue({
+        code: "custom",
+        message: `${table.mode} 应包含 ${expectedCircular} 个圆弧碰撞区`,
+        path: ["circularCushions"],
+      });
+    }
+    const invalidLinearCount =
+      table.mode === "chinese-eight-ball"
+        ? table.linearCushions.length < 3
+        : table.linearCushions.length !== 18;
+    if (invalidLinearCount) {
+      context.addIssue({
+        code: "custom",
+        message:
+          table.mode === "chinese-eight-ball"
+            ? "中八场景应包含至少 3 条直线碰撞边"
+            : "斯诺克球台应包含 18 条直线碰撞边",
+        path: ["linearCushions"],
+      });
+    }
+  });
 
 export const snookerOnSchema = z.enum([
   "red",

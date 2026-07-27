@@ -9,6 +9,7 @@ Tabletop 是一个面向熟人朋友的网页桌游平台。平台提供账号�
 - [需求规格说明](docs/requirements.md)
 - [总体架构设计](docs/architecture.md)
 - [游戏插件扩展指南](docs/game-plugin-guide.md)
+- [2D 场景与碰撞区编辑器](docs/scene-editor.md)
 - [接口与实时协议](docs/protocol.md)
 - [数据模型设计](docs/data-model.md)
 - [部署与运维设计](docs/deployment.md)
@@ -30,6 +31,12 @@ Tabletop 是一个面向熟人朋友的网页桌游平台。平台提供账号�
 ```bash
 pnpm install --frozen-lockfile
 pnpm dev
+```
+
+游戏界面、矢量图形和碰撞区可以在独立的本地编辑器中绘制并导出为游戏可加载的 JSON：
+
+```bash
+pnpm dev:scene
 ```
 
 提交前执行：
