@@ -2,19 +2,15 @@ import type { SeatId } from "@tabletop/protocol";
 import type { GameSystemEventV1 } from "@tabletop/game-sdk/server";
 import { GameRuleError } from "@tabletop/game-sdk/server";
 
-import { simulateBilliardsShot } from "../physics/index.js";
+import {
+  BilliardsCoreError,
+  createBilliardsCoreMatch,
+  reduceBilliardsCoreAction,
+  simulateBilliardsShot,
+} from "../physics/index.js";
 import type { BilliardsAction } from "../shared/actions.js";
 import { tableSpecFor } from "../shared/table.js";
 import type { BilliardsDisplayEvent, BilliardsView } from "../shared/view.js";
-import {
-  adjudicateChineseEightBallShot,
-  resolveEightBallBreakChoice,
-  resolveEightBallGroupChoice,
-} from "./rules/eight-ball.js";
-import { placeCueBall, validateCuePlacement } from "./rules/placement.js";
-import { adjudicatePracticeShot } from "./rules/practice.js";
-import { adjudicateSnookerShot, resolveSnookerDecidingBlackChoice } from "./rules/snooker.js";
-import { createInitialBilliardsState } from "./setup.js";
 import type {
   BilliardsEndReason,
   BilliardsMatchState,
@@ -42,7 +38,7 @@ export function createBilliardsMatch(
   ) {
     throw new GameRuleError("REQUIRES_ONE_OR_TWO_HUMANS");
   }
-  return createInitialBilliardsState(settings, seatIds);
+  return invokeRulesCore(() => createBilliardsCoreMatch(settings, seatIds));
 }
 
 export function getBilliardsActiveSeatIds(state: Readonly<BilliardsMatchState>): readonly SeatId[] {
@@ -81,6 +77,63 @@ function outcomeSummary(state: Readonly<BilliardsMatchState>) {
   };
 }
 
+function invokeRulesCore<T>(operation: () => T): T {
+  try {
+    return operation();
+  } catch (error) {
+    if (
+      error instanceof BilliardsCoreError &&
+      (error.kind === "rule" || error.kind === "invalid-input")
+    ) {
+      throw new GameRuleError(error.code);
+    }
+    throw error;
+  }
+}
+
+function reduceRuleAction(
+  state: Readonly<BilliardsMatchState>,
+  actorSeatId: SeatId,
+  action: BilliardsAction,
+  options: {
+    readonly decidingBlackChooserIndex?: number;
+    readonly simulation?: Readonly<BilliardsSimulationResult>;
+  } = {},
+) {
+  return invokeRulesCore(() =>
+    reduceBilliardsCoreAction({
+      action,
+      actorSeatId,
+      ...options,
+      state,
+    }),
+  );
+}
+
+function transitionForRuleAction(
+  state: Readonly<BilliardsMatchState>,
+  actorSeatId: SeatId,
+  action: BilliardsAction,
+) {
+  const resolution = reduceRuleAction(state, actorSeatId, action);
+  const events: BilliardsDisplayEvent[] = [];
+  if (resolution.state.outcome) {
+    events.push({
+      reason: resolution.state.outcome.reason,
+      type: "billiards.match-ended",
+      winnerSeatId: resolution.state.outcome.winnerSeatId,
+    });
+  }
+  return {
+    kind: "applied" as const,
+    events,
+    ...(resolution.state.outcome
+      ? { outcome: { kind: "completed" as const, publicSummary: outcomeSummary(resolution.state) } }
+      : {}),
+    state: resolution.state,
+  };
+}
+
 function transitionForShot(
   context: Readonly<ActionContextV1>,
   state: Readonly<BilliardsMatchState>,
@@ -106,18 +159,22 @@ function transitionForShot(
     shot: action.shot,
     spinConvergence: state.settings.spinConvergence,
     tableFriction: state.settings.tableFriction,
-  }) as BilliardsSimulationResult;
-  const resolution = state.practice
-    ? adjudicatePracticeShot({ actorSeatId, shot: action.shot, simulation, state })
-    : state.settings.mode === "chinese-eight-ball"
-      ? adjudicateChineseEightBallShot({ actorSeatId, shot: action.shot, simulation, state })
-      : adjudicateSnookerShot({
-          actorSeatId,
-          random: context.random,
-          shot: action.shot,
-          simulation,
-          state,
-        });
+  });
+  let resolution = reduceRuleAction(state, actorSeatId, action, { simulation });
+  if (
+    resolution.state.phase === "decision" &&
+    resolution.state.pendingDecision?.type === "deciding-black-choice"
+  ) {
+    const chooserSeatId = context.random.pick(
+      state.seatIds,
+      `billiards.snooker.deciding-black.${state.shotNumber + 1}.chooser`,
+    );
+    const chooserIndex = state.seatIds.indexOf(chooserSeatId);
+    resolution = reduceRuleAction(state, actorSeatId, action, {
+      decidingBlackChooserIndex: chooserIndex,
+      simulation,
+    });
+  }
   const nextSeatId = resolution.state.activeSeatId;
   const shotEvent: BilliardsDisplayEvent = {
     durationMs: simulation.durationMs,
@@ -131,8 +188,10 @@ function transitionForShot(
     shot: action.shot,
     shotNumber: resolution.state.shotNumber,
     simulationChecksum: simulation.checksum,
+    simulationStateHash: simulation.stateHash,
     spinConvergence: state.settings.spinConvergence,
     tableFriction: state.settings.tableFriction,
+    physicsVersion: simulation.physicsVersion,
     type: "billiards.shot",
   };
   const events: BilliardsDisplayEvent[] = [shotEvent];
@@ -160,73 +219,15 @@ export function handleBilliardsAction(
 ) {
   if (state.phase === "ended" || state.outcome !== null) throw new GameRuleError("MATCH_ENDED");
   if (action.type === "billiards.resign") {
-    if (state.practice) throw new GameRuleError("RESIGN_NOT_AVAILABLE_IN_PRACTICE");
     if (context.actor.kind !== "human" || !state.seatIds.includes(context.actor.seatId)) {
       throw new GameRuleError("PLAYER_ONLY");
     }
-    const actorSeatId = context.actor.seatId;
-    const winnerSeatId = state.seatIds.find((seatId) => seatId !== actorSeatId);
-    if (!winnerSeatId) throw new GameRuleError("REQUIRES_TWO_PLAYERS");
-    const nextState: BilliardsMatchState = {
-      ...state,
-      activeSeatId: null,
-      ballInHandZone: null,
-      outcome: { reason: "resigned", winnerSeatId },
-      pendingDecision: null,
-      phase: "ended",
-    };
-    return {
-      kind: "applied" as const,
-      events: [
-        {
-          reason: "resigned" as const,
-          type: "billiards.match-ended" as const,
-          winnerSeatId,
-        },
-      ],
-      outcome: { kind: "completed" as const, publicSummary: outcomeSummary(nextState) },
-      state: nextState,
-    };
+    return transitionForRuleAction(state, context.actor.seatId, action);
   }
   const actorSeatId = requireCurrentHuman(context, state);
-  switch (action.type) {
-    case "billiards.place-cue": {
-      if (state.phase !== "ball_in_hand" || state.ballInHandZone === null) {
-        throw new GameRuleError("CUE_NOT_IN_HAND");
-      }
-      validateCuePlacement(state, action.x, action.y, state.ballInHandZone);
-      return {
-        kind: "applied" as const,
-        events: [],
-        state: {
-          ...state,
-          ballInHandZone: null,
-          balls: placeCueBall(state.balls, action.x, action.y),
-          phase: "aiming" as const,
-        },
-      };
-    }
-    case "billiards.break-choice":
-      return {
-        kind: "applied" as const,
-        events: [],
-        state: resolveEightBallBreakChoice(state, actorSeatId, action.choice),
-      };
-    case "billiards.choose-group":
-      return {
-        kind: "applied" as const,
-        events: [],
-        state: resolveEightBallGroupChoice(state, actorSeatId, action.group),
-      };
-    case "billiards.deciding-black-choice":
-      return {
-        kind: "applied" as const,
-        events: [],
-        state: resolveSnookerDecidingBlackChoice(state, actorSeatId, action.choice),
-      };
-    case "billiards.shoot":
-      return transitionForShot(context, state, actorSeatId, action);
-  }
+  return action.type === "billiards.shoot"
+    ? transitionForShot(context, state, actorSeatId, action)
+    : transitionForRuleAction(state, actorSeatId, action);
 }
 
 export function handleBilliardsSystemEvent(

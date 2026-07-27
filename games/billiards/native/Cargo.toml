@@ -1,0 +1,21 @@
+[package]
+name = "tabletop-billiards-core"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+rust-version = "1.93.1"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

@@ -9,6 +9,8 @@ readonly REPOSITORY_DIR="/opt/tabletop/repository"
 readonly RELEASES_DIR="/opt/tabletop/releases"
 readonly CURRENT_LINK="/opt/tabletop/current"
 readonly HEALTH_URL="http://127.0.0.1:3000/health/ready"
+readonly RUSTUP_HOME_DIR="/opt/tabletop/toolchains/rustup"
+readonly RUSTUP_CARGO_HOME="/opt/tabletop/toolchains/cargo"
 
 branch="master"
 revision=""
@@ -51,8 +53,11 @@ atomic_link() {
 run_as_tabletop() {
   runuser --user "$APP_USER" -- env -i \
     HOME=/var/lib/tabletop \
+    CARGO_HOME=/var/lib/tabletop/.cargo \
+    CARGO_TARGET_DIR=/var/lib/tabletop/.cache/cargo-target \
+    RUSTUP_HOME="$RUSTUP_HOME_DIR" \
     XDG_CACHE_HOME=/var/lib/tabletop/.cache \
-    PATH=/usr/local/bin:/usr/bin:/bin \
+    PATH="$RUSTUP_CARGO_HOME/bin:/usr/local/bin:/usr/bin:/bin" \
     CI=1 \
     NODE_OPTIONS=--max-old-space-size=1024 \
     "$@"
@@ -176,7 +181,7 @@ resolve_target_commit() {
 }
 
 create_release() {
-  local release_name short_commit timestamp
+  local release_name requested_rust_toolchain short_commit timestamp
   short_commit="${target_commit:0:12}"
   timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
   release_name="${timestamp}-${short_commit}"
@@ -188,6 +193,15 @@ create_release() {
   printf 'commit=%s\nbranch=%s\ncreated_at=%s\n' \
     "$target_commit" "$branch" "$timestamp" > "$release_dir/.tabletop-release"
   chown -R "$APP_USER:$APP_GROUP" "$release_dir"
+
+  requested_rust_toolchain="$(
+    sed -nE 's/^channel = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' \
+      "$release_dir/rust-toolchain.toml"
+  )"
+  [[ -n "$requested_rust_toolchain" ]] || \
+    die "release rust-toolchain.toml does not pin a stable release"
+  run_as_tabletop rustup run "$requested_rust_toolchain" rustc --version >/dev/null || \
+    die "release Rust toolchain is not installed; rerun provision-server.sh"
 
   log "installing locked dependencies"
   (
@@ -282,6 +296,8 @@ main() {
   for command in curl flock git nginx node pnpm runuser sqlite3 systemctl tar; do
     command -v "$command" >/dev/null 2>&1 || die "required command is missing: $command"
   done
+  [[ -x "$RUSTUP_CARGO_HOME/bin/cargo" ]] || \
+    die "Rust toolchain is missing; run provision-server.sh"
   id "$APP_USER" >/dev/null 2>&1 || die "service account does not exist; run provision-server.sh"
   [[ -f /etc/systemd/system/tabletop.service ]] || die "tabletop.service is not installed"
   nginx -t

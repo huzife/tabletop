@@ -162,10 +162,16 @@ const shotDisplayEventSchema = z.strictObject({
   nextSeatId: seatIdSchema.nullable(),
   points: z.number().int().min(0).max(64),
   pottedBallIds: z.array(z.string().min(1).max(24)),
+  physicsVersion: z.string().min(1).max(64).nullable().default(null),
   seatId: seatIdSchema,
   shot: billiardsShotSchema,
   shotNumber: z.number().int().positive(),
   simulationChecksum: z.string().regex(/^[a-f0-9]{8}$/),
+  simulationStateHash: z
+    .string()
+    .regex(/^[a-f0-9]{32}$/)
+    .nullable()
+    .default(null),
   spinConvergence: billiardsSpinConvergenceSchema,
   tableFriction: billiardsTableFrictionSchema,
   type: z.literal("billiards.shot"),

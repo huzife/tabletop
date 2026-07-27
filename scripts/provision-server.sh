@@ -6,6 +6,8 @@ readonly APP_GROUP="tabletop"
 readonly NODE_MAJOR="22"
 readonly NODE_MIN_MINOR="16"
 readonly PNPM_VERSION="11.13.1"
+readonly RUSTUP_HOME_DIR="/opt/tabletop/toolchains/rustup"
+readonly RUSTUP_CARGO_HOME="/opt/tabletop/toolchains/cargo"
 readonly SWAP_FILE="/swapfile-tabletop"
 readonly SWAP_SIZE_MIB="2048"
 
@@ -29,6 +31,7 @@ require_root() {
 require_assets() {
   local asset
   for asset in \
+    "$project_root/rust-toolchain.toml" \
     "$deploy_dir/tabletop.env.example" \
     "$deploy_dir/nginx/tabletop.conf" \
     "$deploy_dir/nginx/tabletop-server.conf" \
@@ -96,6 +99,44 @@ install_node_and_pnpm() {
     log "installing pnpm $PNPM_VERSION"
     npm install --global "pnpm@$PNPM_VERSION"
   fi
+}
+
+install_rust_toolchain() {
+  local rust_toolchain rustup_init
+
+  rust_toolchain="$(
+    sed -nE 's/^channel = "([0-9]+\.[0-9]+\.[0-9]+)"$/\1/p' \
+      "$project_root/rust-toolchain.toml"
+  )"
+  [[ -n "$rust_toolchain" ]] || die "rust-toolchain.toml must pin a stable release"
+  install -d -o root -g root -m 0755 "$RUSTUP_HOME_DIR" "$RUSTUP_CARGO_HOME"
+  if [[ ! -x "$RUSTUP_CARGO_HOME/bin/rustup" ]]; then
+    rustup_init="$(mktemp)"
+    log "installing the pinned Rust toolchain manager"
+    curl --fail --silent --show-error --location \
+      https://sh.rustup.rs \
+      --output "$rustup_init"
+    env \
+      CARGO_HOME="$RUSTUP_CARGO_HOME" \
+      RUSTUP_HOME="$RUSTUP_HOME_DIR" \
+      sh "$rustup_init" -y --no-modify-path --profile minimal --default-toolchain none
+    rm -f -- "$rustup_init"
+  fi
+
+  log "installing Rust $rust_toolchain with the WebAssembly target"
+  env \
+    CARGO_HOME="$RUSTUP_CARGO_HOME" \
+    RUSTUP_HOME="$RUSTUP_HOME_DIR" \
+    "$RUSTUP_CARGO_HOME/bin/rustup" toolchain install "$rust_toolchain" \
+      --profile minimal \
+      --component clippy \
+      --component rustfmt \
+      --target wasm32-unknown-unknown
+  env \
+    CARGO_HOME="$RUSTUP_CARGO_HOME" \
+    RUSTUP_HOME="$RUSTUP_HOME_DIR" \
+    "$RUSTUP_CARGO_HOME/bin/rustup" default "$rust_toolchain"
+  chmod -R a+rX,go-w "$RUSTUP_HOME_DIR" "$RUSTUP_CARGO_HOME"
 }
 
 create_service_account_and_directories() {
@@ -222,6 +263,7 @@ main() {
   install_system_packages
   install_node_and_pnpm
   create_service_account_and_directories
+  install_rust_toolchain
   create_environment_file
   configure_swap
   install_service_configuration

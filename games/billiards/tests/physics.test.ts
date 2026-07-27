@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import type { BilliardsShot } from "../shared/actions.js";
 import type { BilliardsBall } from "../shared/view.js";
-import { billiardsSurfaceParameters, simulateBilliardsShot } from "../physics/index.js";
+import {
+  billiardsSurfaceParameters,
+  getBilliardsCoreInfo,
+  predictBilliardsTrajectory,
+  simulateBilliardsShot,
+} from "../physics/index.js";
 import { tableSpecFor } from "../shared/table.js";
 
 function ball(id: string, kind: BilliardsBall["kind"], x: number, y: number): BilliardsBall {
@@ -183,7 +188,15 @@ describe("billiards shot simulation", () => {
     const second = simulateBilliardsShot({ balls, mode, shot: shot(), captureFrames: true });
 
     expect(first.checksum).toBe(second.checksum);
+    expect(first.stateHash).toBe(second.stateHash);
     expect(first).toEqual(second);
+    expect(first.physicsVersion).toMatch(/^pooltool-rs-event-v\d+$/);
+    expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
+    expect(
+      first.events.every(
+        (event, index) => index === 0 || event.atSeconds >= first.events[index - 1]!.atSeconds,
+      ),
+    ).toBe(true);
     expect(first.frames?.[0]?.atMs).toBe(0);
     expect(first.frames?.at(-1)?.atMs).toBe(first.durationMs);
     for (const finalBall of first.balls) {
@@ -218,10 +231,21 @@ describe("billiards shot simulation", () => {
       ball("one", "solid", 0.92, centreY),
       ball("two", "stripe", 1.4, centreY + 0.08),
     ];
-    const result = simulateBilliardsShot({ balls, mode, shot: shot({ power: 56 }) });
+    const result = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      mode,
+      shot: shot({ power: 56 }),
+    });
 
     expect(result.firstContactBallId).toBe("one");
-    expect(result.balls.find((item) => item.id === "one")?.x).toBeGreaterThan(0.92);
+    expect(
+      Math.max(
+        ...result.frames!.map(
+          (frame) => frame.balls.find((item) => item.id === "one")?.x ?? Number.NEGATIVE_INFINITY,
+        ),
+      ),
+    ).toBeGreaterThan(0.92);
   });
 
   it("uses cushion restitution and records a rail contact", () => {
@@ -437,6 +461,7 @@ describe("billiards shot simulation", () => {
 
     expect(first.firstContactBallIds).toEqual(["nine", "one"]);
     expect(reversed.firstContactBallIds).toEqual(first.firstContactBallIds);
+    expect(reversed.stateHash).toBe(first.stateHash);
   });
 
   it("keeps frame capture out of the authoritative checksum", () => {
@@ -445,6 +470,47 @@ describe("billiards shot simulation", () => {
     const replay = simulateBilliardsShot({ balls, captureFrames: true, mode, shot: shot() });
 
     expect(replay.checksum).toBe(authoritative.checksum);
+    expect(replay.stateHash).toBe(authoritative.stateHash);
     expect(replay.balls).toEqual(authoritative.balls);
+  });
+
+  it("reports the calibrated miscue boundary without treating it as a physics failure", () => {
+    const balls = [ball("cue", "cue", 0.55, centreY)];
+    const safe = simulateBilliardsShot({
+      balls,
+      mode,
+      shot: shot({ tip: { x: 0.93, y: 0 } }),
+    });
+    const miscue = simulateBilliardsShot({
+      balls,
+      mode,
+      shot: shot({ tip: { x: 0.95, y: 0 } }),
+    });
+
+    expect(safe.cueStrike.miscue).toBe(false);
+    expect(miscue.cueStrike.miscue).toBe(true);
+    expect(Math.abs(miscue.cueStrike.squirtRadians)).toBeGreaterThan(0);
+    expect(miscue.durationMs).toBeGreaterThan(0);
+  });
+
+  it("uses the authoritative core for bounded deterministic AI trajectory prediction", () => {
+    const balls = [ball("cue", "cue", 0.45, centreY), ball("one", "solid", 1.2, centreY)];
+    const input = { balls, maxFrames: 7, mode, shot: shot({ power: 48 }) };
+    const first = predictBilliardsTrajectory(input);
+    const second = predictBilliardsTrajectory(input);
+    const simulation = simulateBilliardsShot({ ...input, captureFrames: true });
+    const coreInfo = getBilliardsCoreInfo();
+
+    expect(first).toEqual(second);
+    expect(first.checksum).toBe(simulation.checksum);
+    expect(first.stateHash).toBe(simulation.stateHash);
+    expect(first.physicsVersion).toBe(coreInfo.physicsVersion);
+    expect(coreInfo.rulesVersion).toMatch(/^tabletop-billiards-rules-v\d+$/);
+    expect(first.paths.map(({ id }) => id)).toEqual(["cue", "one"]);
+    expect(first.paths.every(({ points }) => points.length >= 2 && points.length <= 7)).toBe(true);
+    expect(first.paths.every(({ points }) => points[0]?.atMs === 0)).toBe(true);
+    expect(first.paths.every(({ points }) => points.at(-1)?.atMs === simulation.durationMs)).toBe(
+      true,
+    );
   });
 });

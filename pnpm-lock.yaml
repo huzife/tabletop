@@ -257,9 +257,6 @@ importers:
       lucide-react:
         specifier: 'catalog:'
         version: 0.536.0(react@19.2.7)
-      p2-es:
-        specifier: ^1.2.3
-        version: 1.2.3
       react:
         specifier: 'catalog:'
         version: 19.2.7
@@ -2083,9 +2080,6 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
-  p2-es@1.2.3:
-    resolution: {integrity: sha512-H16C/gjXz5G6LZUADtVe/5G7tZwtZrY6wujuLjPfXZLtjKztvFIgdhynShQN1MmpqSwzJ8GbXrOgedWxEagcTg==}
-
   parse5@7.3.0:
     resolution: {integrity: sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw==}
 
@@ -2122,9 +2116,6 @@ packages:
     resolution: {integrity: sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==}
     engines: {node: '>=18'}
     hasBin: true
-
-  poly-decomp-es@0.4.2:
-    resolution: {integrity: sha512-akjZkaTeyfECMNkMqv0g9gFiU2HjpZ5ubJA/aczw1ILdgWQbv1OPwCi05/9JbY2GnGpjm9k85Jdbd/j/p/lg/g==}
 
   postcss@8.5.19:
     resolution: {integrity: sha512-Mz8SaolMd8nB+G13WkORcxQKHZ/NE4xXevtkJHVuG+guo9/wYKlIMTKAqGdEmYOXR2ijPjTYNHssizdaVSUNdQ==}
@@ -3895,10 +3886,6 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  p2-es@1.2.3:
-    dependencies:
-      poly-decomp-es: 0.4.2
-
   parse5@7.3.0:
     dependencies:
       entities: 6.0.1
@@ -3938,8 +3925,6 @@ snapshots:
       playwright-core: 1.61.1
     optionalDependencies:
       fsevents: 2.3.2
-
-  poly-decomp-es@0.4.2: {}
 
   postcss@8.5.19:
     dependencies:

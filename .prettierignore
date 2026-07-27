@@ -2,6 +2,7 @@
 node_modules
 dist
 coverage
+games/billiards/native/target
 docs
 playwright-report
 test-results

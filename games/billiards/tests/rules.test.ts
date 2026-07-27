@@ -4,29 +4,30 @@ import {
   createTestCreateMatchContextV1,
   createTestProjectionContextV1,
   createTestSystemEventContextV1,
-  SequenceGameRandomV1,
 } from "@tabletop/game-sdk/testing";
 import { seatIdSchema } from "@tabletop/protocol";
 import { describe, expect, it } from "vitest";
 
-import { simulateBilliardsShot } from "../physics/index.js";
+import {
+  BilliardsCoreError,
+  createBilliardsCoreMatch,
+  reduceBilliardsCoreAction,
+  simulateBilliardsShot,
+} from "../physics/index.js";
 import {
   createBilliardsMatch,
   handleBilliardsAction,
   handleBilliardsSystemEvent,
   projectBilliardsView,
 } from "../server/engine.js";
-import { adjudicateChineseEightBallShot } from "../server/rules/eight-ball.js";
-import { checkCuePlacement } from "../server/rules/placement.js";
-import { adjudicatePracticeShot } from "../server/rules/practice.js";
-import { adjudicateSnookerShot as adjudicateSnookerShotWithRandom } from "../server/rules/snooker.js";
 import { billiardsServerModule } from "../server/module.js";
-import {
-  createChineseEightBallRack,
-  createInitialBilliardsState,
-  createSnookerRack,
-} from "../server/setup.js";
-import type { BilliardsMatchState, BilliardsSimulationResult } from "../server/state.js";
+import type {
+  AdjudicatedBilliardsShot,
+  BallInHandZone,
+  BilliardsMatchState,
+  BilliardsSimulationResult,
+  ShotAdjudicationInput,
+} from "../server/state.js";
 import type { BilliardsShot } from "../shared/actions.js";
 import {
   billiardsSettings,
@@ -40,14 +41,39 @@ const seat1 = seatIdSchema.parse("seat-1");
 const seat2 = seatIdSchema.parse("seat-2");
 const seats = [seat1, seat2] as const;
 
-function adjudicateSnookerShot(
-  input: Omit<Parameters<typeof adjudicateSnookerShotWithRandom>[0], "random">,
+function reduceShot(
+  input: Readonly<ShotAdjudicationInput>,
   chooserIndex = 1,
-) {
-  return adjudicateSnookerShotWithRandom({
-    ...input,
-    random: new SequenceGameRandomV1([chooserIndex]),
-  });
+): AdjudicatedBilliardsShot {
+  try {
+    return reduceBilliardsCoreAction({
+      action: { shot: input.shot, type: "billiards.shoot" },
+      actorSeatId: input.actorSeatId,
+      decidingBlackChooserIndex: chooserIndex,
+      simulation: input.simulation,
+      state: input.state,
+    });
+  } catch (error) {
+    if (error instanceof BilliardsCoreError) throw new GameRuleError(error.code);
+    throw error;
+  }
+}
+
+function adjudicateChineseEightBallShot(
+  input: Readonly<ShotAdjudicationInput>,
+): AdjudicatedBilliardsShot {
+  return reduceShot(input);
+}
+
+function adjudicateSnookerShot(
+  input: Readonly<ShotAdjudicationInput>,
+  chooserIndex = 1,
+): AdjudicatedBilliardsShot {
+  return reduceShot(input, chooserIndex);
+}
+
+function adjudicatePracticeShot(input: Readonly<ShotAdjudicationInput>): AdjudicatedBilliardsShot {
+  return reduceShot(input);
 }
 
 function settings(mode: BilliardsMode): BilliardsSettings {
@@ -55,11 +81,50 @@ function settings(mode: BilliardsMode): BilliardsSettings {
 }
 
 function state(mode: BilliardsMode): BilliardsMatchState {
-  return createInitialBilliardsState(settings(mode), seats);
+  return createBilliardsCoreMatch(settings(mode), seats);
 }
 
 function practiceState(mode: BilliardsMode): BilliardsMatchState {
-  return createInitialBilliardsState(settings(mode), [seat1]);
+  return createBilliardsCoreMatch(settings(mode), [seat1]);
+}
+
+function createInitialBilliardsState(
+  matchSettings: Readonly<BilliardsSettings>,
+  seatIds: readonly string[],
+): BilliardsMatchState {
+  return createBilliardsCoreMatch(matchSettings, seatIds);
+}
+
+function createChineseEightBallRack() {
+  return createBilliardsCoreMatch(settings("chinese-eight-ball"), seats).balls;
+}
+
+function createSnookerRack() {
+  return createBilliardsCoreMatch(settings("snooker"), seats).balls;
+}
+
+function checkCuePlacement(
+  match: Readonly<BilliardsMatchState>,
+  x: number,
+  y: number,
+  _zone?: BallInHandZone,
+): { readonly ok: true } | { readonly ok: false; readonly ruleCode: string } {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { ok: false, ruleCode: "CUE_OUT_OF_BOUNDS" };
+  }
+  try {
+    reduceBilliardsCoreAction({
+      action: { type: "billiards.place-cue", x, y },
+      actorSeatId: match.activeSeatId ?? "",
+      state: match,
+    });
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof BilliardsCoreError) {
+      return { ok: false, ruleCode: error.code };
+    }
+    throw error;
+  }
 }
 
 function shot(nominatedColor: BilliardsShot["nominatedColor"] = null): BilliardsShot {
@@ -609,7 +674,7 @@ describe("Chinese eight-ball rules", () => {
       state: open,
     });
     expect(oppositeOnly.state.players.every(({ group }) => group === "open")).toBe(true);
-    expect(oppositeOnly.state.activeSeatId).toBe(seat1);
+    expect(oppositeOnly.state.activeSeatId).toBe(seat2);
   });
 
   it("leaves opponent balls down without a foul and continues only after an own-group pot", () => {
@@ -741,7 +806,7 @@ describe("Chinese eight-ball rules", () => {
 
 describe("snooker rules", () => {
   it("scores red then nominated color and respots the color", () => {
-    const initial = state("snooker");
+    const initial = readyToShoot(state("snooker"));
     const red = adjudicateSnookerShot({
       actorSeatId: seat1,
       shot: shot(),
@@ -793,7 +858,7 @@ describe("snooker rules", () => {
   });
 
   it("takes one nominated color after the final red, then starts the ordered clearance", () => {
-    const initial = state("snooker");
+    const initial = readyToShoot(state("snooker"));
     const lastRed: BilliardsMatchState = {
       ...initial,
       balls: initial.balls.map((ball) =>
@@ -820,7 +885,7 @@ describe("snooker rules", () => {
   });
 
   it("awards at least four foul points, using the highest involved color", () => {
-    const initial = state("snooker");
+    const initial = readyToShoot(state("snooker"));
     const foul = adjudicateSnookerShot({
       actorSeatId: seat1,
       shot: shot(),
@@ -874,7 +939,7 @@ describe("snooker rules", () => {
   });
 
   it("keeps legal clearance colors down and advances yellow through black", () => {
-    const initial = state("snooker");
+    const initial = readyToShoot(state("snooker"));
     const clearance: BilliardsMatchState = {
       ...initial,
       balls: initial.balls.map((ball) =>
@@ -894,7 +959,7 @@ describe("snooker rules", () => {
   });
 
   it("respots a tied final black for a D in-hand decider, then declares the winner", () => {
-    const initial = withSnookerScores(state("snooker"), 43, 50);
+    const initial = withSnookerScores(readyToShoot(state("snooker")), 43, 50);
     const finalBlack: BilliardsMatchState = {
       ...initial,
       balls: initial.balls.map((ball) =>
@@ -999,7 +1064,7 @@ describe("snooker rules", () => {
   });
 
   it("lets the deciding-black toss winner defer the first shot", () => {
-    const initial = withSnookerScores(state("snooker"), 43, 50);
+    const initial = withSnookerScores(readyToShoot(state("snooker")), 43, 50);
     const finalBlack: BilliardsMatchState = {
       ...initial,
       balls: initial.balls.map((ball) =>
@@ -1335,12 +1400,23 @@ describe("authoritative action permissions", () => {
     const event = transition.events.find(({ type }) => type === "billiards.shot");
     if (!event || event.type !== "billiards.shot") throw new Error("expected billiards shot event");
     expect(() => billiardsDisplayEventSchema.parse(event)).not.toThrow();
-    const legacyEvent = { ...event } as { spinConvergence?: number; type: "billiards.shot" };
+    const legacyEvent = { ...event } as {
+      physicsVersion?: string | null;
+      simulationStateHash?: string | null;
+      spinConvergence?: number;
+      type: "billiards.shot";
+    };
+    delete legacyEvent.physicsVersion;
+    delete legacyEvent.simulationStateHash;
     delete legacyEvent.spinConvergence;
     const parsedLegacyEvent = billiardsDisplayEventSchema.parse(legacyEvent);
     if (parsedLegacyEvent.type !== "billiards.shot") throw new Error("expected legacy shot event");
+    expect(parsedLegacyEvent.physicsVersion).toBeNull();
+    expect(parsedLegacyEvent.simulationStateHash).toBeNull();
     expect(parsedLegacyEvent.spinConvergence).toBe(1);
     expect(event).toHaveProperty("initialBalls");
+    expect(event.physicsVersion).toMatch(/^pooltool-rs-event-v\d+$/);
+    expect(event.simulationStateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(event.spinConvergence).toBe(1.7);
     expect(event.tableFriction).toBe(0.26);
     expect(event).not.toHaveProperty("frames");
@@ -1353,6 +1429,8 @@ describe("authoritative action permissions", () => {
       tableFriction: event.tableFriction,
     });
     expect(replay.checksum).toBe(event.simulationChecksum);
+    expect(replay.physicsVersion).toBe(event.physicsVersion);
+    expect(replay.stateHash).toBe(event.simulationStateHash);
 
     const projected = projectBilliardsView(createTestProjectionContextV1(), initial, {
       kind: "player",

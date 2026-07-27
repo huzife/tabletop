@@ -7,7 +7,7 @@ import type {
   ReceivedGameTransientEventV1,
 } from "@tabletop/game-sdk/web";
 
-import { simulateBilliardsShot } from "../physics/index.js";
+import { simulateBilliardsShot } from "../physics/browser.js";
 import type {
   BilliardsAction,
   BilliardsBreakChoice,
@@ -826,11 +826,17 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
   const mountedRef = useRef(false);
   const frameRef = useRef<number | null>(null);
   const runningRef = useRef(false);
+  const preparationRef = useRef<Promise<void>>(Promise.resolve());
+  const preparationGenerationRef = useRef(0);
+  const pendingPreparationsRef = useRef(0);
   const startNextRef = useRef<() => void>(() => undefined);
   const reducedRef = useRef(reducedMotion);
   reducedRef.current = reducedMotion;
 
   const cancel = () => {
+    preparationGenerationRef.current += 1;
+    preparationRef.current = Promise.resolve();
+    pendingPreparationsRef.current = 0;
     if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
     queueRef.current = [];
@@ -847,6 +853,9 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       mountedRef.current = false;
+      preparationGenerationRef.current += 1;
+      preparationRef.current = Promise.resolve();
+      pendingPreparationsRef.current = 0;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
@@ -866,7 +875,14 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
       reducedRef.current ||
       queueRef.current.length === 0
     ) {
-      if (mountedRef.current && queueRef.current.length === 0) setIsAnimating(false);
+      if (
+        mountedRef.current &&
+        !runningRef.current &&
+        queueRef.current.length === 0 &&
+        pendingPreparationsRef.current === 0
+      ) {
+        setIsAnimating(false);
+      }
       return;
     }
     const item = queueRef.current.shift();
@@ -897,7 +913,9 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
         frameRef.current = null;
         runningRef.current = false;
         setAnimatedBalls(null);
-        if (queueRef.current.length === 0) setIsAnimating(false);
+        if (queueRef.current.length === 0 && pendingPreparationsRef.current === 0) {
+          setIsAnimating(false);
+        }
         startNextRef.current();
         return;
       }
@@ -922,27 +940,71 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
       return true;
     });
     if (fresh.length === 0 || reducedMotion) return;
-    for (const event of fresh) {
-      try {
-        const result = simulateBilliardsShot({
-          balls: event.initialBalls,
-          captureFrames: true,
-          mode: event.mode,
-          shot: event.shot,
-          spinConvergence: event.spinConvergence,
-          tableFriction: event.tableFriction,
-        }) as {
-          readonly checksum: string;
-          readonly frames?: readonly RawPlaybackFrame[];
-        };
-        if (result.checksum !== event.simulationChecksum) continue;
-        const frames = hydrateFrames(event, result.frames ?? []);
-        if (frames.length > 0) queueRef.current.push({ event, frames });
-      } catch {
-        // A malformed historical event should never prevent the authoritative view from rendering.
+    const generation = preparationGenerationRef.current;
+    pendingPreparationsRef.current += 1;
+    setIsAnimating(true);
+
+    const prepare = async () => {
+      if (
+        generation !== preparationGenerationRef.current ||
+        !mountedRef.current ||
+        reducedRef.current
+      ) {
+        return;
       }
-    }
-    if (queueRef.current.length > 0) startNextRef.current();
+      for (const event of fresh) {
+        try {
+          const result = (await simulateBilliardsShot({
+            balls: event.initialBalls,
+            captureFrames: true,
+            mode: event.mode,
+            shot: event.shot,
+            spinConvergence: event.spinConvergence,
+            tableFriction: event.tableFriction,
+          })) as {
+            readonly checksum: string;
+            readonly frames?: readonly RawPlaybackFrame[];
+            readonly physicsVersion: string;
+            readonly stateHash: string;
+          };
+          if (
+            generation !== preparationGenerationRef.current ||
+            !mountedRef.current ||
+            reducedRef.current
+          ) {
+            return;
+          }
+          if (
+            result.checksum !== event.simulationChecksum ||
+            (event.physicsVersion !== null && result.physicsVersion !== event.physicsVersion) ||
+            (event.simulationStateHash !== null && result.stateHash !== event.simulationStateHash)
+          ) {
+            continue;
+          }
+          const frames = hydrateFrames(event, result.frames ?? []);
+          if (frames.length > 0) queueRef.current.push({ event, frames });
+        } catch {
+          // A malformed historical event should never prevent the authoritative view from rendering.
+        }
+      }
+      if (queueRef.current.length > 0) startNextRef.current();
+    };
+
+    const scheduled = preparationRef.current.then(prepare);
+    preparationRef.current = scheduled
+      .catch(() => undefined)
+      .finally(() => {
+        if (generation !== preparationGenerationRef.current) return;
+        pendingPreparationsRef.current = Math.max(0, pendingPreparationsRef.current - 1);
+        if (
+          pendingPreparationsRef.current === 0 &&
+          queueRef.current.length === 0 &&
+          !runningRef.current &&
+          mountedRef.current
+        ) {
+          setIsAnimating(false);
+        }
+      });
   }, [displayEvents, reducedMotion]);
 
   return { animatedBalls, isAnimating };
@@ -1053,7 +1115,7 @@ export function opponentAimPreview(
 }
 
 function eventKey(event: BilliardsShotDisplayEvent): string {
-  return `${event.shotNumber}:${event.simulationChecksum}`;
+  return `${event.shotNumber}:${event.simulationStateHash ?? event.simulationChecksum}`;
 }
 
 function defaultAimAngle(view: BilliardsView): number {

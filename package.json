@@ -9,8 +9,10 @@
   },
   "scripts": {
     "build": "pnpm -r --if-present build",
-    "check": "pnpm format:check && pnpm check:architecture && pnpm typecheck && pnpm test",
+    "check": "pnpm format:check && pnpm check:architecture && pnpm check:native && pnpm typecheck && pnpm test",
     "check:architecture": "node scripts/check-game-boundaries.mjs",
+    "check:native": "pnpm -r --if-present check:native",
+    "predev": "pnpm --filter @tabletop/game-billiards build:native",
     "dev": "pnpm --parallel --filter @tabletop/server --filter @tabletop/web dev",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
