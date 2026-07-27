@@ -1,8 +1,13 @@
 import type { BilliardsMode } from "../shared/settings.js";
 import type { BilliardsBall } from "../shared/view.js";
-import type { BilliardsTableSpec } from "../shared/table.js";
+import type { BilliardsTableSpec, TablePocketSpec } from "../shared/table.js";
 
 export type CanvasBall = BilliardsBall & { readonly z?: number };
+
+type CanvasTableSpec = Pick<
+  BilliardsTableSpec,
+  "ballDiameter" | "baulkLineX" | "dRadius" | "height" | "pockets" | "spots" | "width"
+>;
 
 export interface TableGeometry {
   readonly height: number;
@@ -18,6 +23,12 @@ export interface TableGeometry {
 }
 
 export interface TablePoint {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface PocketCircle {
+  readonly radius: number;
   readonly x: number;
   readonly y: number;
 }
@@ -73,10 +84,23 @@ export function tablePointFromClient(
   };
 }
 
+export function pocketCircle(
+  geometry: Pick<TableGeometry, "playLeft" | "playTop" | "scale">,
+  pocket: TablePocketSpec,
+): PocketCircle {
+  // This is the authoritative ball-centre point-of-no-return circle, so it
+  // must not be shifted or enlarged for presentation.
+  return {
+    radius: pocket.captureRadius * geometry.scale,
+    x: geometry.playLeft + pocket.x * geometry.scale,
+    y: geometry.playTop + pocket.y * geometry.scale,
+  };
+}
+
 export function drawBilliardsTable(
   context: CanvasRenderingContext2D,
   geometry: TableGeometry,
-  table: BilliardsTableSpec,
+  table: CanvasTableSpec,
   mode: BilliardsMode,
   balls: readonly CanvasBall[],
   angle: number,
@@ -98,10 +122,8 @@ export function drawBilliardsTable(
 
   const radius = (table.ballDiameter * scale) / 2;
   for (const pocket of table.pockets) {
-    const px = playLeft + pocket.x * scale;
-    const py = playTop + pocket.y * scale;
-    const pocketRadius = Math.max(radius * 1.9, pocket.captureRadius * scale * 1.08);
-    drawPocket(context, px, py, pocketRadius);
+    const circle = pocketCircle(geometry, pocket);
+    drawPocket(context, circle.x, circle.y, circle.radius);
   }
 
   if (options.placementPoint !== undefined) {
@@ -243,7 +265,7 @@ function drawRailDiamonds(
 function drawMarkings(
   context: CanvasRenderingContext2D,
   geometry: TableGeometry,
-  table: BilliardsTableSpec,
+  table: CanvasTableSpec,
   mode: BilliardsMode,
 ): void {
   const { playHeight, playLeft, playTop, playWidth, scale } = geometry;

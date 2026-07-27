@@ -4,7 +4,7 @@ import { seatIdSchema } from "@tabletop/protocol";
 import type { BilliardsBreakChoice } from "../shared/actions.js";
 import { tableSpecFor } from "../shared/table.js";
 import type { BilliardsView } from "../shared/view.js";
-import { tableGeometry, tablePointFromClient } from "../web/canvas.js";
+import { pocketCircle, tableGeometry, tablePointFromClient } from "../web/canvas.js";
 import {
   breakChoiceLabel,
   breakDecisionReasonLabel,
@@ -97,6 +97,22 @@ describe("billiards canvas coordinates", () => {
       y: expect.closeTo(expected.y, 8),
     });
   });
+
+  it.each(["chinese-eight-ball", "snooker"] as const)(
+    "draws every %s pocket at its authoritative capture circle",
+    (mode) => {
+      const table = tableSpecFor(mode);
+      const geometry = tableGeometry(1_000, 500, table);
+
+      for (const pocket of table.pockets) {
+        expect(pocketCircle(geometry, pocket)).toEqual({
+          radius: pocket.captureRadius * geometry.scale,
+          x: geometry.playLeft + pocket.x * geometry.scale,
+          y: geometry.playTop + pocket.y * geometry.scale,
+        });
+      }
+    },
+  );
 
   it("restricts behind-line cue placement to the baulk side", () => {
     const view = viewFixture({ ballInHandZone: "behind-line", phase: "ball_in_hand" });

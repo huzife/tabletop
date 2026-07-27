@@ -26,7 +26,6 @@ import type {
   BilliardsShotDisplayEvent,
   BilliardsView,
 } from "../shared/view.js";
-import { tableSpecFor } from "../shared/table.js";
 import { billiardsAimPreviewSchema, type BilliardsAimPreview } from "../shared/transient.js";
 import {
   constrainCueTip,
@@ -466,10 +465,9 @@ function BilliardsCanvas({
   );
   const [hoverPoint, setHoverPoint] = useState<TablePoint | undefined>();
   const pointerRef = useRef<{ id: number; mode: "aim" | "place" } | null>(null);
-  const spec = tableSpecFor(mode);
   const geometry = useMemo(
-    () => tableGeometry(size.width, size.height, spec),
-    [size.height, size.width, spec],
+    () => tableGeometry(size.width, size.height, table),
+    [size.height, size.width, table],
   );
   const cueRadius = table.ballDiameter / 2;
   const placementValid =
@@ -533,7 +531,7 @@ function BilliardsCanvas({
     const context = canvas.getContext("2d");
     if (context === null) return;
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawBilliardsTable(context, geometry, spec, mode, balls, aimAngle, elevation, tip, {
+    drawBilliardsTable(context, geometry, table, mode, balls, aimAngle, elevation, tip, {
       aimEnabled: aimVisible,
       placementValid,
       ...(placementEnabled && hoverPoint !== undefined ? { placementPoint: hoverPoint } : {}),
@@ -551,7 +549,7 @@ function BilliardsCanvas({
     placementValid,
     pixelRatio,
     size,
-    spec,
+    table,
     tip,
   ]);
 
