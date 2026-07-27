@@ -8,11 +8,7 @@ import {
   billiardsShotSchema,
   snookerColorSchema,
 } from "./actions.js";
-import {
-  billiardsModeSchema,
-  billiardsSpinConvergenceSchema,
-  billiardsTableFrictionSchema,
-} from "./settings.js";
+import { billiardsModeSchema } from "./settings.js";
 
 export const billiardsBallKindSchema = z.enum([
   "cue",
@@ -36,8 +32,8 @@ export const billiardsBallSchema = z.strictObject({
   pocketed: z.boolean(),
   rotation: z.number().finite(),
   value: z.number().int().min(0).max(8),
-  x: z.number().finite().nonnegative().max(4),
-  y: z.number().finite().nonnegative().max(2),
+  x: z.number().finite().min(-1).max(5),
+  y: z.number().finite().min(-1).max(3),
 });
 export type BilliardsBall = z.infer<typeof billiardsBallSchema>;
 
@@ -60,8 +56,8 @@ const tableViewSchema = z.strictObject({
     z.strictObject({
       captureRadius: z.number().finite().positive(),
       kind: z.enum(["corner", "side"]),
-      x: z.number().finite().nonnegative(),
-      y: z.number().finite().nonnegative(),
+      x: z.number().finite(),
+      y: z.number().finite(),
     }),
   ),
   spots: z.array(
@@ -147,15 +143,13 @@ export const billiardsViewSchema = z.strictObject({
   practice: z.boolean(),
   shotNumber: z.number().int().nonnegative(),
   snookerOn: snookerOnSchema.nullable(),
-  spinConvergence: billiardsSpinConvergenceSchema,
-  tableFriction: billiardsTableFrictionSchema,
   table: tableViewSchema,
   viewerSeatId: seatIdSchema.nullable(),
 });
 export type BilliardsView = z.infer<typeof billiardsViewSchema>;
 
 const shotDisplayEventSchema = z.strictObject({
-  durationMs: z.number().int().nonnegative().max(20_000),
+  durationMs: z.number().int().nonnegative().max(300_000),
   foulCode: z.string().min(1).max(64).nullable(),
   initialBalls: z.array(billiardsBallSchema).min(16).max(22),
   mode: billiardsModeSchema,
@@ -172,8 +166,6 @@ const shotDisplayEventSchema = z.strictObject({
     .regex(/^[a-f0-9]{32}$/)
     .nullable()
     .default(null),
-  spinConvergence: billiardsSpinConvergenceSchema,
-  tableFriction: billiardsTableFrictionSchema,
   type: z.literal("billiards.shot"),
 });
 
@@ -183,10 +175,25 @@ const matchEndedDisplayEventSchema = z.strictObject({
   winnerSeatId: seatIdSchema,
 });
 
-export const billiardsDisplayEventSchema = z.discriminatedUnion("type", [
-  shotDisplayEventSchema,
-  matchEndedDisplayEventSchema,
-]);
+export const billiardsDisplayEventSchema = z.preprocess(
+  (input) => {
+    if (
+      typeof input !== "object" ||
+      input === null ||
+      !("type" in input) ||
+      input.type !== "billiards.shot"
+    ) {
+      return input;
+    }
+    const event = { ...input } as Record<string, unknown>;
+    // Old display events remain readable, but removed room-tuning fields do
+    // not survive parsing into the current contract.
+    delete event.spinConvergence;
+    delete event.tableFriction;
+    return event;
+  },
+  z.discriminatedUnion("type", [shotDisplayEventSchema, matchEndedDisplayEventSchema]),
+);
 export type BilliardsDisplayEvent = z.infer<typeof billiardsDisplayEventSchema>;
 
 export type BilliardsShotDisplayEvent = Extract<

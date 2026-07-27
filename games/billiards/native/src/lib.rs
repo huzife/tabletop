@@ -7,10 +7,11 @@ mod model;
 mod physics;
 mod replay;
 pub mod rules;
+mod stronge;
 
 pub use api::{CoreError, CoreRequest, CoreResponse, process_json};
 pub use model::*;
-pub use physics::{predict_shot, simulate_shot, surface_parameters};
+pub use physics::{ball_parameters, predict_shot, simulate_shot};
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {

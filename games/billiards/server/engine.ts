@@ -157,8 +157,6 @@ function transitionForShot(
     balls: initialBalls,
     mode: state.settings.mode,
     shot: action.shot,
-    spinConvergence: state.settings.spinConvergence,
-    tableFriction: state.settings.tableFriction,
   });
   let resolution = reduceRuleAction(state, actorSeatId, action, { simulation });
   if (
@@ -189,8 +187,6 @@ function transitionForShot(
     shotNumber: resolution.state.shotNumber,
     simulationChecksum: simulation.checksum,
     simulationStateHash: simulation.stateHash,
-    spinConvergence: state.settings.spinConvergence,
-    tableFriction: state.settings.tableFriction,
     physicsVersion: simulation.physicsVersion,
     type: "billiards.shot",
   };
@@ -347,8 +343,6 @@ export function projectBilliardsView(
     practice: state.practice,
     shotNumber: state.shotNumber,
     snookerOn: state.snookerOn,
-    spinConvergence: state.settings.spinConvergence,
-    tableFriction: state.settings.tableFriction,
     table: {
       ballDiameter: table.ballDiameter,
       baulkLineX: table.baulkLineX,

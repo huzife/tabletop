@@ -77,22 +77,15 @@ describe("web routes", () => {
 
     expect(screen.getByLabelText("房间密码（可选）")).toBeDisabled();
     expect(screen.queryByText("AI 难度")).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("台面与边库摩擦系数"), {
-      target: { value: "0.26" },
-    });
-    fireEvent.change(screen.getByLabelText("高低杆旋转收敛倍率"), {
-      target: { value: "1.7" },
-    });
     fireEvent.click(screen.getByRole("radio", { name: /斯诺克/ }));
-    expect(screen.getByText("0.26（慢台）")).toBeInTheDocument();
-    expect(screen.getByText("1.7x（快速）")).toBeInTheDocument();
+    expect(screen.queryByText("台面物理")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
 
     await waitFor(() => expect(createRoomBody).toBeDefined());
     expect(createRoomBody).toMatchObject({
       gameId: "billiards",
       practice: true,
-      settings: { mode: "snooker", spinConvergence: 1.7, tableFriction: 0.26 },
+      settings: { mode: "snooker" },
     });
     expect(createRoomBody).not.toHaveProperty("botProfileId");
   });

@@ -108,7 +108,7 @@ describe("billiards canvas coordinates", () => {
     ).toBe(false);
     expect(noticeLabel(view)).toBe("母球：发球线后");
     expect(phaseLabel(view)).toBe("发球线后摆球");
-    expect(defaultCuePlacement(view)).toEqual({ x: 0.3175, y: 0.63 });
+    expect(defaultCuePlacement(view)).toEqual({ x: 0.24765, y: 0.4953 });
   });
 
   it("provides a valid keyboard starting point inside the snooker D", () => {
@@ -379,16 +379,14 @@ function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
     ],
     shotNumber: 0,
     snookerOn: null,
-    spinConvergence: 1,
-    tableFriction: 0.2,
     table: {
       ballDiameter: 0.05715,
-      baulkLineX: 0.635,
+      baulkLineX: 0.4953,
       dRadius: null,
-      height: 1.26,
+      height: 0.9906,
       pockets: [],
-      spots: [{ id: "foot", x: 1.905, y: 0.63 }],
-      width: 2.54,
+      spots: [{ id: "foot", x: 1.4859, y: 0.4953 }],
+      width: 1.9812,
     },
     viewerSeatId: firstSeat,
     ...overrides,

@@ -1211,7 +1211,7 @@ describe("RoomConnectionGateway", () => {
         gameId: "billiards",
         name: "临时瞄准同步房",
         practice: false,
-        settings: { mode: "chinese-eight-ball", tableFriction: 0.2 },
+        settings: { mode: "chinese-eight-ball" },
       },
       url: "/api/v1/rooms",
     });

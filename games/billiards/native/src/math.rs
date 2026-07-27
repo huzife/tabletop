@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign};
 
-pub const EPSILON: f64 = 1.0e-9;
+/// Pooltool's event solvers use 100 machine epsilons when deciding whether an
+/// event lies strictly in the future. Numerical root finding has its own,
+/// deliberately larger tolerances below.
+pub const EPSILON: f64 = f64::EPSILON * 100.0;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,8 +14,6 @@ pub struct Vec2 {
 }
 
 impl Vec2 {
-    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
-
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
@@ -27,19 +28,6 @@ impl Vec2 {
 
     pub fn length(self) -> f64 {
         self.length_squared().sqrt()
-    }
-
-    pub fn normalized(self) -> Self {
-        let length = self.length();
-        if length <= EPSILON {
-            Self::ZERO
-        } else {
-            self / length
-        }
-    }
-
-    pub fn perpendicular(self) -> Self {
-        Self::new(-self.y, self.x)
     }
 }
 
@@ -97,6 +85,122 @@ impl Neg for Vec2 {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Vec3 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+}
+
+impl Vec3 {
+    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
+    pub const X: Self = Self::new(1.0, 0.0, 0.0);
+    pub const Z: Self = Self::new(0.0, 0.0, 1.0);
+
+    pub const fn new(x: f64, y: f64, z: f64) -> Self {
+        Self { x, y, z }
+    }
+
+    pub const fn xy(self) -> Vec2 {
+        Vec2::new(self.x, self.y)
+    }
+
+    pub fn dot(self, other: Self) -> f64 {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+
+    pub fn cross(self, other: Self) -> Self {
+        Self::new(
+            self.y * other.z - self.z * other.y,
+            self.z * other.x - self.x * other.z,
+            self.x * other.y - self.y * other.x,
+        )
+    }
+
+    pub fn length_squared(self) -> f64 {
+        self.dot(self)
+    }
+
+    pub fn length(self) -> f64 {
+        self.length_squared().sqrt()
+    }
+
+    pub fn normalized(self) -> Self {
+        let length = self.length();
+        if length <= EPSILON {
+            Self::ZERO
+        } else {
+            self / length
+        }
+    }
+
+    pub fn rotate_z(self, radians: f64) -> Self {
+        let (sine, cosine) = radians.sin_cos();
+        Self::new(
+            cosine * self.x - sine * self.y,
+            sine * self.x + cosine * self.y,
+            self.z,
+        )
+    }
+}
+
+impl Add for Vec3 {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self::new(self.x + rhs.x, self.y + rhs.y, self.z + rhs.z)
+    }
+}
+
+impl AddAssign for Vec3 {
+    fn add_assign(&mut self, rhs: Self) {
+        self.x += rhs.x;
+        self.y += rhs.y;
+        self.z += rhs.z;
+    }
+}
+
+impl Sub for Vec3 {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self::new(self.x - rhs.x, self.y - rhs.y, self.z - rhs.z)
+    }
+}
+
+impl SubAssign for Vec3 {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.x -= rhs.x;
+        self.y -= rhs.y;
+        self.z -= rhs.z;
+    }
+}
+
+impl Mul<f64> for Vec3 {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self::new(self.x * rhs, self.y * rhs, self.z * rhs)
+    }
+}
+
+impl Div<f64> for Vec3 {
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        Self::new(self.x / rhs, self.y / rhs, self.z / rhs)
+    }
+}
+
+impl Neg for Vec3 {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self::new(-self.x, -self.y, -self.z)
+    }
+}
+
 pub fn clamp(value: f64, minimum: f64, maximum: f64) -> f64 {
     value.max(minimum).min(maximum)
 }
@@ -118,12 +222,6 @@ pub fn normalize_rotation(value: f64) -> f64 {
         (value + std::f64::consts::PI).rem_euclid(turn) - std::f64::consts::PI,
         1.0e-6,
     )
-}
-
-pub fn smallest_root_in_interval(coefficients: &[f64], minimum: f64, maximum: f64) -> Option<f64> {
-    let mut roots = roots_in_interval(coefficients, minimum, maximum);
-    roots.sort_by(f64::total_cmp);
-    roots.into_iter().find(|root| *root > minimum + 1.0e-8)
 }
 
 pub fn roots_in_interval(coefficients: &[f64], minimum: f64, maximum: f64) -> Vec<f64> {
@@ -169,10 +267,11 @@ pub fn roots_in_interval(coefficients: &[f64], minimum: f64, maximum: f64) -> Ve
         .map(|value| value.abs())
         .sum::<f64>()
         .max(1.0);
-    let tolerance = 1.0e-10 * scale;
+    let detection_tolerance = 1.0e-10 * scale;
+    let solve_tolerance = 1.0e-14 * scale;
     let mut roots = Vec::new();
     for point in &boundaries {
-        if polynomial(&coefficients, *point).abs() <= tolerance {
+        if polynomial(&coefficients, *point).abs() <= detection_tolerance {
             roots.push(*point);
         }
     }
@@ -189,10 +288,10 @@ pub fn roots_in_interval(coefficients: &[f64], minimum: f64, maximum: f64) -> Ve
         {
             continue;
         }
-        for _ in 0..72 {
+        for _ in 0..96 {
             let middle = (left + right) * 0.5;
             let middle_value = polynomial(&coefficients, middle);
-            if middle_value.abs() <= tolerance || right - left <= 1.0e-11 {
+            if middle_value.abs() <= solve_tolerance || right - left <= 1.0e-13 {
                 left = middle;
                 right = middle;
                 break;

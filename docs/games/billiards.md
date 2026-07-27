@@ -14,7 +14,7 @@
 本文用以下措辞区分能力边界：
 
 - **产品实现**：本仓库 Rust/WASM 核心、TypeScript 框架适配器和协议共同提供的能力。
-- **Pooltool 参考**：从 Pooltool 的公开理论、事件驱动架构和几何表达获得的设计参考，不表示源码移植或数值等价。
+- **Pooltool 固定基线**：逐公式、逐参数移植固定提交的默认二维 resolver、事件选择和预制桌型；不表示 Rust 与 Python 在所有平台逐 bit 相同。
 - **未完整实现**：需要裁判判断、器材标定或更完整三维接触模型的已知边界，不宣称与正式赛事完全一致。
 
 ## 2. 与原框架的接入
@@ -47,28 +47,37 @@ flowchart LR
 
 WASM 构建产物使用插件内的稳定相对路径 `games/billiards/native/generated/tabletop_billiards_core.wasm`。打包后会复制到 `dist/native/generated`；不要在代码或文档中写入开发机路径。
 
-## 3. Pooltool 的参考边界
+## 3. Pooltool 固定基线与兼容边界
 
-研究基线固定为 Pooltool commit [`9a8abfe`](https://github.com/ekiefl/pooltool/tree/9a8abfe)，避免上游后续演进改变本文所指的行为。Pooltool 的 [JOSS 论文](https://joss.theoj.org/papers/10.21105/joss.07301)将其定位为面向科研与工程的通用 Python 台球模拟器；其事件驱动算法会解析下一次碰撞或运动状态变化并直接演化到该时刻。
+研究基线固定为 Pooltool commit [`9a8abfe0da4c3b588dd7779e7f8530123170e742`](https://github.com/ekiefl/pooltool/tree/9a8abfe0da4c3b588dd7779e7f8530123170e742)，避免上游后续演进改变本文所指的行为。Pooltool 的 [JOSS 论文](https://joss.theoj.org/papers/10.21105/joss.07301)将其定位为面向科研与工程的通用 Python 台球模拟器；其事件驱动算法会解析下一次碰撞或运动状态变化并直接演化到该时刻。
 
-产品主要参考了：
+Rust 物理核心直接按下列固定版本实现：
 
 - [算法博客](https://ekiefl.github.io/2020/12/20/pooltool-alg/)中的连续事件驱动循环；
 - [物理 theory 系列](https://ekiefl.github.io/2020/04/24/pooltool-theory/)中的静止、自转、滑动、滚动和腾空分段模型；
-- 固定版本的[事件循环](https://github.com/ekiefl/pooltool/blob/9a8abfe/pooltool/evolution/event_based/simulate.py)、[运动演化](https://github.com/ekiefl/pooltool/blob/9a8abfe/pooltool/physics/evolve/__init__.py)、[球球碰撞时间](https://github.com/ekiefl/pooltool/blob/9a8abfe/pooltool/evolution/event_based/detect/ball_ball.py)和[球桌布局](https://github.com/ekiefl/pooltool/blob/9a8abfe/pooltool/objects/table/layout.py)；
+- 固定版本的[事件循环](https://github.com/ekiefl/pooltool/blob/9a8abfe0da4c3b588dd7779e7f8530123170e742/pooltool/evolution/event_based/simulate.py)、[运动演化](https://github.com/ekiefl/pooltool/blob/9a8abfe0da4c3b588dd7779e7f8530123170e742/pooltool/physics/evolve/__init__.py)、[球球碰撞时间](https://github.com/ekiefl/pooltool/blob/9a8abfe0da4c3b588dd7779e7f8530123170e742/pooltool/evolution/event_based/detect/ball_ball.py)和[球桌布局](https://github.com/ekiefl/pooltool/blob/9a8abfe0da4c3b588dd7779e7f8530123170e742/pooltool/objects/table/layout.py)；
 - Pooltool [官方文档](https://pooltool.readthedocs.io/en/stable/)对事件、物体和可替换物理策略的组织方式。
 
-以下内容不是从 Pooltool 获得的完整产品方案：
+采用该提交 `default_resolver()` 的固定组合：
+
+- 球球：`FrictionalInelastic` 与 `AlciatoreBallBallFriction(a=0.009951, b=0.108, c=1.088)`；
+- 直线库与圆形袋角：`StrongeCompliant`，`omega_ratio=1.8`；
+- 球袋：`CanonicalBallPocket`；
+- 球杆：`InstantaneousPoint2D`，english 与 squirt throttle 均为 `1`；
+- 球桌：`FrictionalInelasticTable(min_bounce_height=0.005)`；
+- 滑动、滚动、自转与状态转换：canonical 分段演化。
+
+兼容边界如下：
 
 | 领域 | 固定 Pooltool 版本的边界 | 本产品的处理 |
 | --- | --- | --- |
-| 同时事件 | 事件循环选择并解析单个下一事件，不是联合多接触约束求解器 | 把同一最早时间容差桶中的球球/球库接触合并，固定顺序运行固定轮数 PGS |
+| 同时事件 | 事件循环每次只选择并解析一个下一事件；严格同时时按事件 tier 与能量排序 | 保持相同的单事件语义，解析后使相关旧预测失效并重算，不再使用 PGS |
 | 比赛规则 | 上游 [ruleset](https://github.com/ekiefl/pooltool/tree/9a8abfe/pooltool/ruleset) 中的 `eight_ball` 是通用八球规则，不是 WPA Heyball profile；Snooker ruleset 不完整覆盖推杆、跳球、miss、离台和完整裁判流程 | 独立 Rust profile 按本产品明确范围处理回合、犯规、计分、摆球和决策 |
-| 击球 | 上游提供[瞬时点接触等可替换模型](https://pooltool.readthedocs.io/en/stable/resources/custom_physics.html)，但不是本产品的输入协议或滑杆裁决合同 | 定义稳定的方向、力度、击球点、仰角输入和 `miscue`/squirt 诊断 |
+| 击球 | 上游默认输入 `V0` 是 m/s，且默认二维 resolver 不产生竖直速度，也没有滑杆裁决 | 房间继续使用 `[1,100]` 力度并线性映射到 `V0`；`50 → 2 m/s`。`miscue` 仅为产品诊断，不改变上游公式 |
 | 产品确定性 | 科研模拟 API 不等于房间协议、跨端回放或联网校验方案 | 同一 WASM、稳定排序、量化、版本号、兼容 checksum 和状态 hash |
 | AI | 模拟可作为 AI/机器人研究环境，但不提供本产品的 bot 策略 | 暴露有界 `predict` 原语；搜索、选杆和风险策略仍由上层实现 |
 
-因此，本实现不是 Pooltool 的 Rust 端口，不加载 Pooltool Python 包，也不承诺与 Pooltool 逐事件或逐浮点数一致。固定上游版本对同时接触、赛事规则、滑杆裁决和联网状态哈希没有给出可直接接入本框架的完整答案；这些是本仓库的产品实现。
+物理公式、事件类型与优先级、默认 resolver 参数、球参数和桌型几何以该固定提交为兼容目标。Rust 使用自己的确定性多项式根求解和序列化，因此只承诺在回归容差内与固定 Python 基线一致，不承诺跨语言逐 bit 相同。比赛规则、力度百分比适配、滑杆诊断、联网状态哈希和回放协议属于本产品。
 
 ## 4. 规则 profile
 
@@ -114,7 +123,7 @@ Rust rules 模块采用 serde 兼容的纯函数状态机：
 - 中式八球需要裁判判断击球意图、器材干扰或非物理输入才能确认的行为；
 - 把物理层 `miscue` 诊断直接等同于规则犯规。
 
-跳越检测已进入两种 profile 的物理摘要：斯诺克的实际跳球判犯规；中式八球只把当前 profile 定义的非法下塞跳越判犯规。以上是产品规则选择，不表示已覆盖正式规则书中的全部裁判裁量。
+规则 reducer 仍能裁决外部摘要中的跳越记录，但固定 Pooltool 默认 resolver 是二维模型，正常出杆不会生成 `jumpedBallIds`。启用三维 resolver 前不能把当前仰角输入解释为已实现跳球。以上是产品规则选择，不表示已覆盖正式规则书中的全部裁判裁量。
 
 ## 5. 击球输入与滑杆诊断
 
@@ -123,14 +132,14 @@ Rust rules 模块采用 serde 兼容的纯函数状态机：
 | 字段 | 范围 | 含义 |
 | --- | --- | --- |
 | `angle` | `[-π, π]` | 台面坐标中的瞄准方向 |
-| `power` | `[1, 100]` | 经非线性曲线映射到球杆速度 |
+| `power` | `[1, 100]` | 线性映射到 Pooltool 球杆速度 `V0 = power / 25 m/s` |
 | `tip.x`、`tip.y` | 单位球面半径 `0.95` 内 | 左右塞和高低杆击球点 |
-| `elevation` | `[0°, 90°]` | 球杆仰角，影响平面冲量与竖直速度 |
+| `elevation` | `[0°, 90°]` | 球杆仰角，进入瞬时点接触公式；默认二维 resolver 随后把竖直速度置零 |
 | `nominatedColor` | 可空 | 斯诺克需要击彩时的提名 |
 
-Rust 击球模型根据力度、击球点和仰角计算母球平面速度、三轴角速度、跳升速度与偏移角。返回的 `cueStrike` 诊断包含 `cueSpeed`、`jumpSpeed`、`squirtRadians` 和 `miscue`。
+Rust 击球模型逐式实现 Pooltool 的球杆/球质量、球体惯量、接触点坐标旋转和 end-mass squirt 公式，得到母球平面速度与三轴角速度。返回的 `cueStrike` 诊断包含 `cueSpeed`、固定为零的 `jumpSpeed`、`squirtRadians` 和 `miscue`。
 
-当前滑杆判断是明确的产品启发式：归一化击球点半径大于 `0.94` 时标记 `miscue`，输入 schema 的最大半径为 `0.95`；标记后会降低有效抓球与冲量。它没有模拟皮头形变、巧粉、杆身刚度、接触持续时间或二次触球，也不会仅凭诊断自动判规则犯规。若以后改变阈值或冲量映射，必须更新物理版本和回归基线。
+当前滑杆判断是明确的产品诊断：归一化击球点半径大于 `0.94` 时标记 `miscue`，输入 schema 的最大半径为 `0.95`；该标记不降低抓球或冲量，以免修改 Pooltool 结果。它没有模拟皮头形变、巧粉、杆身刚度、接触持续时间或二次触球，也不会仅凭诊断自动判规则犯规。
 
 `billiards.aim-preview` 仍是可丢弃的临时事件，只用于向对手展示方向、力度、击球点和仰角。它不改变房间修订号、不进入 Rust reducer，也不参与回放 hash。
 
@@ -140,34 +149,33 @@ Rust 击球模型根据力度、击球点和仰角计算母球平面速度、三
 
 每颗球在模拟期间处于以下离散状态之一：
 
-- `stationary`：平动和自转均低于停止阈值；
+- `stationary`：平动和自转为零；
 - `spinning`：球心静止但仍有竖直轴自转；
 - `sliding`：球与台呢接触点存在相对滑动；
-- `rolling`：进入近似无滑滚动；
-- `airborne`：具有简化高度与竖直速度；
+- `rolling`：无滑滚动；
+- `airborne`：三维 resolver 可用的抛体状态；固定默认击球模型不产生该状态；
 - `pocketed`：已被袋口捕获的终止状态。
 
-状态内保存位置、平面速度、竖直高度/速度、三轴角速度和渲染转角。台呢作用按状态分段解析演化，滑动、滚动、自转和落台会预测各自的转换时刻。
+状态内保存三维位置、三维速度、三维角速度和渲染转角。台呢作用按 Pooltool 闭式方程分段演化，不使用产品停止速度阈值。
 
 ### 6.2 候选事件与事件队列
 
 模拟不是按固定小步长推进。每轮会：
 
-1. 由当前运动多项式预测状态转换、球球、直线库边、圆形袋角、袋口捕获和安全边界候选；
-2. 按时间、事件优先级和稳定对象键排序；
-3. 取最早时间容差桶，把所有球演化到该时刻；
-4. 先处理袋口，再联合求解接触，最后处理边界和状态转换；
-5. 接触改变轨迹后重新生成候选，直到全部静止或达到硬上限。
+1. 由当前运动多项式预测状态转换、球球、直线库边、圆形袋角、袋口与球桌候选；
+2. 每种事件类型保留最早候选，再选全局最早事件；
+3. 严格同时时按 Pooltool tier 排序：球袋/状态转换优先于球球/球库/球桌，同 tier 按能量降序；
+4. 把所有球精确演化到该时刻，只解析一个事件；
+5. 使受影响预测失效并重算，直到没有后续事件。
 
-这里的“事件队列”是每次接触后重建并排序的候选集合，而不是长期保存所有旧事件的堆；碰撞后旧预测已经失效。球球与圆形几何的到达时间使用多项式根求解，包含四次方程；直线库边和安全边界使用较低阶解析式。单杆设有最大模拟时长和最大事件数，异常输入不能无限占用服务端。
+这里的“事件队列”按数学语义等价地在每次事件后重算；缓存只会影响性能，不改变结果。球球、圆形袋角和袋口使用四次多项式，直线库使用二次式。没有原先的 20 秒强制静止；产品仅保留 50,000 事件的异常保护。
 
 ### 6.3 球球、球库与多接触
 
-- 球球碰撞使用法向恢复和受摩擦上限约束的切向冲量，并更新侧旋。
-- 直线库边和圆形袋角共享接触约束表达，库边摩擦、恢复、切向响应和滚动扰动来自表面参数。
-- 同一最早时间桶内的球球、球库接触先按稳定键排序，再用固定 24 轮投影 Gauss-Seidel 顺序冲量求解；最后进行小量穿透修正。
-- 袋口事件优先于同一桶内的普通接触，已进袋球不会继续参与后续约束。
-- 这是一种确定性的刚体近似，不是精确互补问题求解，也不模拟球、库胶和台呢的连续形变。
+- 球球碰撞使用 Pooltool 的等质量 frictional-inelastic 解、`e_b=0.95` 和 Alciatore 速度相关摩擦；滑动反向时切换到无滑解。
+- 直线库与圆形袋角使用同一个 Stronge compliant 解，`omega_ratio=1.8`、`e_c=0.85`；中式 `f_c=0.2`，斯诺克 `f_c=0.5`。
+- 碰撞前执行 Pooltool 的 `MIN_DIST=1e-6` kiss 修正；近似同速持续接触使用上游的 10% 径向动量转移保护。
+- 多球同时接触沿用上游的顺序单事件解析，不再额外引入联合多接触模型。
 
 动画帧不是物理权威。服务端默认只得到最终状态和事件摘要；浏览器回放或 `predict` 需要时才以约 `60 Hz` 采样状态。
 
@@ -177,32 +185,41 @@ Rust 击球模型根据力度、击球点和仰角计算母球平面速度、三
 
 | 项目 | 中式八球 | 斯诺克 |
 | --- | --- | --- |
-| 比赛区 | `2.540 m × 1.260 m` | `3.569 m × 1.778 m` |
-| 球径 | `0.05715 m` | `0.0525 m` |
-| 仿真球质量 | `0.163 kg` | `0.142 kg` |
-| 发球线/D 区 | 距底库 `0.635 m` | 发球线 `0.737 m`，D 半径 `0.292 m` |
+| 比赛区 | `1.9812 m × 0.9906 m` | `3.569 m × 1.778 m` |
+| 球径 | `0.05715 m` | `0.0523875 m` |
+| 仿真球质量 | `0.170097 kg` | `0.140 kg` |
+| 发球线/D 区 | 长度的 `1/4` | 发球线 `0.737 m`，D 半径 `0.292 m` |
 | 黑球点 | 不适用 | 距顶库 `0.324 m` |
 
-Rust `TableGeometry` 不再把整张球桌表示成四条无限平面：
+中式八球直接采用 Pooltool `SEVEN_FOOT_SHOWOOD`，斯诺克采用 `SNOOKER_GENERIC`。Rust `TableGeometry` 逐式生成：
 
-- 长库和短库在六个袋口处分段；
-- 角袋使用斜向 jaw 线段，中袋使用朝内 jaw 线段；
-- 各线段端点建立圆形 knuckle，用于袋角擦碰；
-- 袋本身使用圆形捕获区域，并检查球的高度；
+- 18 条带方向的直线库/袋颚；
+- 12 个使用预制 corner/side jaw 半径的圆形袋角；
+- 六个按 corner depth 的对角外移或 side depth 的法向外移生成的袋心；
+- Pooltool 原始袋半径作为 point-of-no-return 捕获半径；
 - 每条直线库、圆形袋角和袋口都带静态 AABB。
 
-球球候选先计算运动区间的 swept AABB，再按 x 轴 sweep-and-prune 排除不可能相交的球对；球与桌台几何也先做 swept AABB 重叠测试。当前没有更复杂的 BVH，因为标准球桌的几何数量固定且较小。
+球球及球与几何候选先做运动 AABB 重叠测试。当前没有更复杂的 BVH，因为标准桌型的几何数量固定且较小。
 
-官方规则通过认证器材模板约束袋口轮廓，并没有给出适用于所有球桌的单一捕获圆。本产品的 jaw 深度、knuckle 半径和袋口捕获半径是可测试、可标定的几何近似，不是 WPA/WPBSA 器材认证。高球采用 2.5D 高度模型；安全边界会把未进袋球保留在可玩区域，因此尚未模拟完整离台飞行和台外落点。
+袋口与库边 profile 的原始参数如下（长度单位均为米，角度单位为度）：
+
+| 参数 | 中式八球 | 斯诺克 |
+| --- | ---: | ---: |
+| cushion width / height / nose radius | `0.0508 / 0.036576 / 0.005` | `0.04763 / 0.039 / 0.005` |
+| corner width / angle / depth | `0.118 / 5.3 / 0.0417` | `0.08014 / 0 / 0.06735` |
+| corner pocket / jaw radius | `0.062 / 0.02095` | `0.0889 / 0.0889` |
+| side width / angle / depth | `0.137 / 7.14 / 0.0685` | `0.08457 / 0 / 0.05159` |
+| side pocket / jaw radius | `0.0645 / 0.00795` | `0.05319 / 0.0669` |
+
+Pooltool 的 `Pocket.depth` 不属于桌型 layout 参数；预制桌型创建的六个袋都保留组件默认值 `0.08 m`。这里的 corner/side depth 只负责把袋心移到比赛区之外，不能代替垂直袋深。
+
+这些参数是固定 Pooltool 预制桌型，不等同于 WPA/WPBSA 器材认证。产品不再使用原先按球径比例推导的 jaw、knuckle 或袋口 shelf 启发式。
 
 ## 8. 参数配置与标定
 
-房间公开两个可配置参数：
+房间设置只保留 `mode`。原 `tableFriction`、`spinConvergence` 及其 UI、动作输入、展示事件和视图字段已经删除，避免房间参数把固定 Pooltool profile 改写成另一套模型。
 
-- `tableFriction`：`0.12-0.28`，步进 `0.01`，默认 `0.20`。它映射到滑动摩擦、滚动减速度、侧旋衰减、库边摩擦、切向响应和恢复系数。
-- `spinConvergence`：`0.5-2.0`，步进 `0.1`，默认 `1.0`。它缩放平面旋转向无滑滚动收敛的速度。
-
-TypeScript 展示层的 `billiardsSurfaceParameters` 与 Rust 核心保持同一映射，测试应阻止两端漂移。球尺寸、质量、恢复、袋口几何、击球速度曲线、滑杆阈值、停止阈值和求解容差目前是随 WASM 发布的 profile 常量，不从开发机配置或未受控文件读取。
+球、球杆、台呢、恢复、袋口/袋角几何、事件 epsilon 与 resolver 选择都是随 WASM 发布的固定 profile 常量，不从开发机配置或未受控文件读取。中式八球使用 `u_s=0.2`、`u_r=0.01`；斯诺克使用 `u_s=0.5`、`u_r=0.01`；两者 `u_sp=(4/9)R`、`g=9.81`。
 
 当前产品已具备参数入口、固定基线和回归测试，但没有自动拟合工具或已认证的实台测量数据集。后续标定应遵循：
 
@@ -220,14 +237,14 @@ fixture 或标定工具尚未落库时，文档示例只能使用类似 `<calibr
 - 出杆动作只携带输入参数；
 - 服务端同步执行 WASM 物理与 Rust 规则 reducer；
 - 房间快照只保存静止后的球位和规则状态；
-- 展示事件保存本杆初始球位、击球参数、表面设置、裁定摘要、物理版本、兼容 checksum 和 `stateHash`；
+- 展示事件保存本杆初始球位、击球参数、裁定摘要、物理版本、兼容 checksum 和 `stateHash`；
 - 浏览器用相同 WASM 重新采样动画，版本、checksum 或 `stateHash` 不一致时不采用该动画，最终视图仍服从服务端快照。
 
 物理确定性依赖以下合同：
 
 - Node 与浏览器加载同一份 WASM 字节；
 - 所有输入拒绝非有限数值并限制范围；
-- 候选事件、对象 ID、同时接触和输出数组采用稳定顺序；
+- 候选事件、对象 ID 和输出数组采用固定迭代顺序；
 - 权威输出做固定精度量化；
 - 规则 reducer 无全局 I/O，权威随机选择由平台显式注入并固化到新状态；
 - `physicsVersion` 与 `rulesVersion` 标识行为兼容边界。
@@ -248,8 +265,6 @@ Node 入口同步导出 `predictBilliardsTrajectory`，浏览器入口导出同�
   balls,
   mode,
   shot,
-  tableFriction?,
-  spinConvergence?,
   maxFrames?
 }
 ```
@@ -290,15 +305,15 @@ pnpm check
 测试至少应覆盖：
 
 - 固定输入重复执行、Node/WASM ABI、浏览器加载和跨端 checksum/hash 一致；
-- 六种运动状态、状态转换、球球、直线库边、圆形袋角、进袋和安全上限；
-- 同时首碰、球群/球库多接触、稳定事件顺序和无非有限数值；
-- 高低杆、左右塞、仰角、跳越、滑杆诊断和三档表面参数；
+- 六种运动状态、闭式状态转换、球球、直线库边、圆形袋角、进袋和事件保护；
+- Pooltool 单事件优先级、持续接触保护、稳定事件顺序和无非有限数值；
+- 高低杆、左右塞、仰角二维行为、squirt 与滑杆诊断；
 - 两种标准摆球、置球区域、开球选择、分组、犯规、计分、清彩和决胜黑球；
 - 展示事件回放失败回退到权威快照，及 `predict` 的帧数上限和结果稳定性。
 
 ## 12. 公开参考
 
-- Pooltool GitHub 固定版本：<https://github.com/ekiefl/pooltool/tree/9a8abfe>
+- Pooltool GitHub 固定版本：<https://github.com/ekiefl/pooltool/tree/9a8abfe0da4c3b588dd7779e7f8530123170e742>
 - Pooltool 官方文档：<https://pooltool.readthedocs.io/en/stable/>
 - Pooltool 算法博客：<https://ekiefl.github.io/2020/12/20/pooltool-alg/>
 - Pooltool 物理 theory：<https://ekiefl.github.io/2020/04/24/pooltool-theory/>

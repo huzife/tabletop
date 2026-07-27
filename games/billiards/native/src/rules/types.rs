@@ -117,8 +117,6 @@ pub struct BilliardsShot {
 #[serde(rename_all = "camelCase")]
 pub struct BilliardsSettings {
     pub mode: BilliardsMode,
-    pub spin_convergence: f64,
-    pub table_friction: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

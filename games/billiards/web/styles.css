@@ -588,11 +588,6 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.billiards-settings__surface-controls {
-  display: grid;
-  gap: 14px;
-}
-
 .billiards-settings__mode {
   align-items: center;
   background: #ffffff;
@@ -626,53 +621,7 @@
   line-height: 1.35;
 }
 
-.billiards-settings__friction {
-  display: grid;
-  gap: 7px;
-}
-
-.billiards-settings__friction-header {
-  align-items: baseline;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-}
-
-.billiards-settings__friction-header strong {
-  color: #202522;
-  font-size: 13px;
-}
-
-.billiards-settings__friction-header output {
-  color: #1d684f;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.billiards-settings__friction input[type="range"] {
-  accent-color: #23815f;
-  margin: 0;
-  width: 100%;
-}
-
-.billiards-settings__friction-scale {
-  color: #68716c;
-  display: grid;
-  font-size: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.billiards-settings__friction-scale span:nth-child(2) {
-  text-align: center;
-}
-
-.billiards-settings__friction-scale span:last-child {
-  text-align: right;
-}
-
-.billiards-settings__group:disabled .billiards-settings__mode,
-.billiards-settings__group:disabled .billiards-settings__friction {
+.billiards-settings__group:disabled .billiards-settings__mode {
   cursor: not-allowed;
   opacity: 0.54;
 }

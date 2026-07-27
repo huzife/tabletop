@@ -542,7 +542,7 @@ function billiardsSnapshotMessage(matchId: string | undefined, revision: number)
     payload: {
       ...snapshot.payload,
       gameId: "billiards",
-      settings: { mode: "chinese-eight-ball", tableFriction: 0.2 },
+      settings: { mode: "chinese-eight-ball" },
     },
     revision,
   };

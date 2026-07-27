@@ -1,7 +1,7 @@
-use crate::math::Vec2;
+use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "pooltool-rs-event-v1";
+pub const PHYSICS_VERSION: &str = "pooltool-9a8abfe-rs-v1";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum BilliardsMode {
@@ -65,10 +65,6 @@ pub struct SimulateShotInput {
     pub capture_frames: bool,
     pub mode: BilliardsMode,
     pub shot: Shot,
-    #[serde(default)]
-    pub spin_convergence: Option<f64>,
-    #[serde(default)]
-    pub table_friction: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -77,10 +73,6 @@ pub struct PredictShotInput {
     pub balls: Vec<Ball>,
     pub mode: BilliardsMode,
     pub shot: Shot,
-    #[serde(default)]
-    pub spin_convergence: Option<f64>,
-    #[serde(default)]
-    pub table_friction: Option<f64>,
     #[serde(default = "default_prediction_frames")]
     pub max_frames: usize,
 }
@@ -192,15 +184,17 @@ pub struct TrajectoryPrediction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SurfaceParameters {
-    pub cushion_friction: f64,
-    pub cushion_restitution: f64,
-    pub cushion_roll_disturbance: f64,
-    pub cushion_tangential_response: f64,
-    pub rolling_deceleration: f64,
-    pub side_spin_damping: f64,
+pub struct BallParameters {
+    pub mass: f64,
+    pub radius: f64,
     pub sliding_friction: f64,
-    pub spin_convergence: f64,
+    pub rolling_friction: f64,
+    pub spinning_friction: f64,
+    pub ball_restitution: f64,
+    pub table_restitution: f64,
+    pub cushion_restitution: f64,
+    pub cushion_friction: f64,
+    pub gravity: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -235,7 +229,6 @@ pub struct TableSpec {
     pub height: f64,
     pub ball_diameter: f64,
     pub ball_mass: f64,
-    pub cushion_restitution: f64,
     pub baulk_line_x: Option<f64>,
     pub d_radius: Option<f64>,
     pub pockets: Vec<PocketSpec>,
@@ -245,11 +238,9 @@ pub struct TableSpec {
 #[derive(Clone, Debug)]
 pub(crate) struct DynamicBall {
     pub source: Ball,
-    pub position: Vec2,
-    pub z: f64,
-    pub velocity: Vec2,
-    pub vertical_velocity: f64,
-    pub spin: [f64; 3],
+    pub position: Vec3,
+    pub velocity: Vec3,
+    pub spin: Vec3,
     pub rotation: f64,
     pub state: MotionState,
     pub pocketed: bool,

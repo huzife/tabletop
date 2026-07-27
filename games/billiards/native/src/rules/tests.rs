@@ -6,11 +6,7 @@ const SEAT_ONE: &str = "seat-1";
 const SEAT_TWO: &str = "seat-2";
 
 fn settings(mode: BilliardsMode) -> BilliardsSettings {
-    BilliardsSettings {
-        mode,
-        spin_convergence: 1.0,
-        table_friction: 0.2,
-    }
+    BilliardsSettings { mode }
 }
 
 fn state(mode: BilliardsMode) -> BilliardsMatchState {
@@ -209,17 +205,13 @@ fn cue_placement_checks_bounds_zones_pockets_and_overlap() {
             .code,
         "CUE_OUT_OF_BOUNDS"
     );
-    assert_eq!(
-        check_cue_placement(
-            &anywhere,
-            table.ball_diameter / 2.0,
-            table.ball_diameter / 2.0,
-            None,
-        )
-        .expect_err("pocket")
-        .code,
-        "CUE_IN_POCKET"
-    );
+    check_cue_placement(
+        &anywhere,
+        table.ball_diameter / 2.0,
+        table.ball_diameter / 2.0,
+        None,
+    )
+    .expect("Pooltool's pocket point-of-no-return lies beyond the corner shelf");
     let object = anywhere
         .balls
         .iter()

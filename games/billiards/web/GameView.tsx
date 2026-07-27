@@ -959,8 +959,6 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
             captureFrames: true,
             mode: event.mode,
             shot: event.shot,
-            spinConvergence: event.spinConvergence,
-            tableFriction: event.tableFriction,
           })) as {
             readonly checksum: string;
             readonly frames?: readonly RawPlaybackFrame[];
