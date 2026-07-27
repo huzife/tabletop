@@ -33,7 +33,7 @@ describe("Chinese eight-ball scene asset", () => {
       role: "collision",
       type: "polyline",
     });
-    expect(scene.boundary.points).toHaveLength(41);
+    expect(scene.boundary.points).toHaveLength(64);
     expect(scene.holes).toHaveLength(6);
     expect(scene.holes.every((hole) => hole.name === "hole" && hole.role === "collision")).toBe(
       true,
@@ -45,17 +45,17 @@ describe("Chinese eight-ball scene asset", () => {
 
     expect(scene.document.canvas).toMatchObject({ height: 1550, width: 2830 });
     expect(calibration).toEqual({
-      bottom: 1378.4328856435407,
-      left: 166.01387826471466,
-      right: 2650.9530074703275,
-      top: 161.62538557934008,
+      bottom: 1380.0472401790155,
+      left: 179.0850323222278,
+      right: 2648.6026852312284,
+      top: 169.9527598209846,
     } satisfies BilliardsSceneCalibration);
     const scaleX = 2540 / (calibration.right - calibration.left);
     const scaleY = 1270 / (calibration.bottom - calibration.top);
     expect((calibration.right - calibration.left) * scaleX).toBeCloseTo(2540, 12);
     expect((calibration.bottom - calibration.top) * scaleY).toBeCloseTo(1270, 12);
-    expect(scaleX).toBeCloseTo(1.0221578348327547, 12);
-    expect(scaleY).toBeCloseTo(1.0437148028204897, 12);
+    expect(scaleX).toBeCloseTo(1.0285409367323105, 12);
+    expect(scaleY).toBeCloseTo(1.0495048284364084, 12);
   });
 
   it("rejects a reserved element with the wrong fixed name", () => {

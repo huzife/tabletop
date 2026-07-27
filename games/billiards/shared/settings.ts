@@ -5,7 +5,7 @@ export const billiardsModeSchema = z.enum(["chinese-eight-ball", "snooker"]);
 export type BilliardsMode = z.infer<typeof billiardsModeSchema>;
 
 export const DEFAULT_CLOTH_SLIDING_FRICTION = 0.08;
-export const DEFAULT_CLOTH_ROLLING_FRICTION = 0.006;
+export const DEFAULT_CLOTH_ROLLING_FRICTION = 0.01;
 export const CLOTH_SLIDING_FRICTION_RANGE = {
   max: 0.2,
   min: 0.04,

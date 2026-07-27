@@ -1152,7 +1152,7 @@ mod tests {
         for mode in [BilliardsMode::ChineseEightBall, BilliardsMode::Snooker] {
             let geometry = TableGeometry::for_mode(mode);
             let (linear_count, circular_count) = match mode {
-                BilliardsMode::ChineseEightBall => (41, 0),
+                BilliardsMode::ChineseEightBall => (64, 0),
                 BilliardsMode::Snooker => (18, 12),
             };
             assert_eq!(geometry.linear_cushions.len(), linear_count);
@@ -1160,7 +1160,7 @@ mod tests {
             assert_eq!(
                 geometry.boundary_vertices.len(),
                 if mode == BilliardsMode::ChineseEightBall {
-                    41
+                    64
                 } else {
                     0
                 }
@@ -1211,12 +1211,12 @@ mod tests {
         close(chinese.pockets[1].x, 1.270);
         close(chinese.pockets[1].y, 0.0);
         close(chinese.pockets[1].mouth_width, 0.088);
-        close(chinese.pockets[0].capture_x, -0.026_940_020_961_878_627);
-        close(chinese.pockets[0].capture_y, -0.033_748_697_793_534_704);
-        close(chinese.pockets[1].capture_x, 1.272_250_859_709_348);
-        close(chinese.pockets[1].capture_y, -0.065_182_960_377_894_28);
-        close(chinese.pockets[0].capture_radius, 0.071_056_560_266_567_37);
-        close(chinese.pockets[1].capture_radius, 0.071_056_560_266_567_37);
+        close(chinese.pockets[0].capture_x, -0.027_868_326_396_569_717);
+        close(chinese.pockets[0].capture_y, -0.032_241_646_388_616_38);
+        close(chinese.pockets[1].capture_x, 1.269_922_544_729_567_2);
+        close(chinese.pockets[1].capture_y, -0.063_850_291_079_169_26);
+        close(chinese.pockets[0].capture_radius, 0.071_475_260_119_196_5);
+        close(chinese.pockets[1].capture_radius, 0.071_475_260_119_196_5);
 
         let snooker = table_spec(BilliardsMode::Snooker);
         close(snooker.width, 3.569);
@@ -1242,13 +1242,13 @@ mod tests {
     #[test]
     fn dynamic_chinese_scene_has_the_expected_collision_contract() {
         let scene = load_test_chinese_eight_ball_scene();
-        assert_eq!(scene.boundary.len(), 41);
+        assert_eq!(scene.boundary.len(), 64);
         assert_eq!(scene.holes.len(), 6);
         close(scene.canvas_width, 2_830.0);
         close(scene.canvas_height, 1_550.0);
-        close(scene.calibration.left, 166.013_878_264_714_66);
-        close(scene.calibration.right, 2_650.953_007_470_327_5);
-        close(scene.calibration.top, 161.625_385_579_340_08);
-        close(scene.calibration.bottom, 1_378.432_885_643_540_7);
+        close(scene.calibration.left, 179.085_032_322_227_8);
+        close(scene.calibration.right, 2_648.602_685_231_228_4);
+        close(scene.calibration.top, 169.952_759_820_984_6);
+        close(scene.calibration.bottom, 1_380.047_240_179_015_5);
     }
 }

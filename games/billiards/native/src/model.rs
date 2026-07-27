@@ -1,9 +1,9 @@
 use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v6";
+pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v7";
 pub const DEFAULT_CLOTH_SLIDING_FRICTION: f64 = 0.08;
-pub const DEFAULT_CLOTH_ROLLING_FRICTION: f64 = 0.006;
+pub const DEFAULT_CLOTH_ROLLING_FRICTION: f64 = 0.01;
 pub const MIN_CLOTH_SLIDING_FRICTION: f64 = 0.04;
 pub const MAX_CLOTH_SLIDING_FRICTION: f64 = 0.2;
 pub const MIN_CLOTH_ROLLING_FRICTION: f64 = 0.003;

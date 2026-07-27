@@ -51,14 +51,14 @@ describe("Pooltool-compatible billiards core", () => {
       0.084, 0.088, 0.084, 0.084, 0.088, 0.084,
     ]);
     for (const pocket of pool.pockets) {
-      expect(pocket.captureRadius).toBeCloseTo(0.07105656026656737, 12);
+      expect(pocket.captureRadius).toBeCloseTo(0.0714752601191965, 12);
     }
     expect(pool.pockets[0]).toMatchObject({ x: 0, y: 0 });
-    expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.026940020961878627, 12);
-    expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.033748697793534704, 12);
+    expect(pool.pockets[0]?.captureX).toBeCloseTo(-0.027868326396569717, 12);
+    expect(pool.pockets[0]?.captureY).toBeCloseTo(-0.03224164638861638, 12);
     expect(pool.pockets[1]).toMatchObject({ x: 2.54 / 2, y: 0 });
-    expect(pool.pockets[1]?.captureX).toBeCloseTo(1.272250859709348, 12);
-    expect(pool.pockets[1]?.captureY).toBeCloseTo(-0.06518296037789428, 12);
+    expect(pool.pockets[1]?.captureX).toBeCloseTo(1.2699225447295672, 12);
+    expect(pool.pockets[1]?.captureY).toBeCloseTo(-0.06385029107916926, 12);
 
     const snooker = getBilliardsTableSpec("snooker");
     expect(snooker).toMatchObject({
@@ -105,7 +105,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v6");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v7");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -147,7 +147,7 @@ describe("Pooltool-compatible billiards core", () => {
     const explicitDefault = simulateBilliardsShot({
       balls,
       captureFrames: true,
-      clothRollingFriction: 0.006,
+      clothRollingFriction: 0.01,
       clothSlidingFriction: 0.08,
       mode,
       shot: backspinShot,
