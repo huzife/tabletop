@@ -48,6 +48,7 @@ export interface CreateRoomInput {
 }
 
 const noOpPublisher: RoomPublisher = {
+  disconnectConnection: () => undefined,
   disconnectMember: () => undefined,
   publishClosed: () => undefined,
   publishSnapshot: () => undefined,
@@ -533,6 +534,7 @@ export class RoomRegistry {
 
   #publisherProxy(): RoomPublisher {
     return {
+      disconnectConnection: (...arguments_) => this.#publisher.disconnectConnection(...arguments_),
       disconnectMember: (...arguments_) => this.#publisher.disconnectMember(...arguments_),
       publishClosed: (...arguments_) => this.#publisher.publishClosed(...arguments_),
       publishSnapshot: (...arguments_) => this.#publisher.publishSnapshot(...arguments_),

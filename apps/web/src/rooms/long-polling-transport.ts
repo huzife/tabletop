@@ -2,6 +2,9 @@ import type { ClientCommand, ConnectionId, ServerMessage } from "@tabletop/proto
 
 import { ApiClientError, roomConnectionApi } from "../api/client";
 
+const OPEN_REQUEST_TIMEOUT_MS = 10_000;
+const AUTHORITATIVE_COMMAND_TIMEOUT_MS = 10_000;
+const POLL_REQUEST_TIMEOUT_MS = 25_000;
 const TRANSIENT_COMMAND_TIMEOUT_MS = 2_000;
 
 export interface LongPollingTransportClose {
@@ -46,7 +49,12 @@ export class RoomLongPollingTransport {
 
   async open(): Promise<void> {
     try {
-      const response = await roomConnectionApi.open(this.#abortController.signal);
+      const response = await requestWithTimeout(
+        "建立长轮询连接",
+        OPEN_REQUEST_TIMEOUT_MS,
+        this.#abortController.signal,
+        (signal) => roomConnectionApi.open(signal),
+      );
       if (this.#closed) return;
       this.#connectionId = response.connectionId;
       for (const message of response.messages) {
@@ -72,7 +80,12 @@ export class RoomLongPollingTransport {
     this.#commandQueue = this.#commandQueue
       .then(async () => {
         if (this.#closed) return;
-        await roomConnectionApi.command(connectionId, command, this.#abortController.signal);
+        await requestWithTimeout(
+          "提交房间命令",
+          AUTHORITATIVE_COMMAND_TIMEOUT_MS,
+          this.#abortController.signal,
+          (signal) => roomConnectionApi.command(connectionId, command, signal),
+        );
       })
       .catch((error: unknown) => this.#fail(error));
     return true;
@@ -132,9 +145,11 @@ export class RoomLongPollingTransport {
   async #pollLoop(): Promise<void> {
     while (!this.#closed && this.#connectionId !== undefined) {
       try {
-        const response = await roomConnectionApi.poll(
-          this.#connectionId,
+        const response = await requestWithTimeout(
+          "等待长轮询消息",
+          POLL_REQUEST_TIMEOUT_MS,
           this.#abortController.signal,
+          (signal) => roomConnectionApi.poll(this.#connectionId!, signal),
         );
         if (this.#closed) return;
         for (const message of response.messages) {
@@ -160,7 +175,61 @@ export class RoomLongPollingTransport {
   }
 }
 
+class TransportRequestTimeoutError extends Error {
+  constructor(operation: string) {
+    super(`${operation}超时`);
+    this.name = "TransportRequestTimeoutError";
+  }
+}
+
+function requestWithTimeout<T>(
+  operationName: string,
+  timeoutMs: number,
+  parentSignal: AbortSignal,
+  request: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      parentSignal.removeEventListener("abort", handleParentAbort);
+      callback();
+    };
+    const handleParentAbort = () => {
+      controller.abort();
+      finish(() => reject(new DOMException("Aborted", "AbortError")));
+    };
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+      finish(() => reject(new TransportRequestTimeoutError(operationName)));
+    }, timeoutMs);
+
+    if (parentSignal.aborted) {
+      handleParentAbort();
+      return;
+    }
+    parentSignal.addEventListener("abort", handleParentAbort, { once: true });
+    let pendingRequest: Promise<T>;
+    try {
+      pendingRequest = request(controller.signal);
+    } catch (error) {
+      finish(() => reject(error));
+      return;
+    }
+    void pendingRequest.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
 function closeFromError(error: unknown): LongPollingTransportClose {
+  if (error instanceof TransportRequestTimeoutError) {
+    return { code: 1006, reason: error.message };
+  }
   if (error instanceof ApiClientError) {
     if (error.code === "AUTH_SESSION_EXPIRED" || error.code.startsWith("AUTH_")) {
       return { code: 4004, reason: error.message };
@@ -174,5 +243,5 @@ function closeFromError(error: unknown): LongPollingTransportClose {
 }
 
 function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
+  return error instanceof Error && error.name === "AbortError";
 }

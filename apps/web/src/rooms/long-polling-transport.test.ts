@@ -49,9 +49,9 @@ describe("RoomLongPollingTransport", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0]?.signal?.aborted).toBe(true);
     expect(requests[1]?.body).toMatchObject({ type: "room.seat.claim" });
-    expect(vi.getTimerCount()).toBe(0);
     expect(onClose).not.toHaveBeenCalled();
     transport.close();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("aborts in-flight poll and transient requests when closed", async () => {
@@ -114,9 +114,94 @@ describe("RoomLongPollingTransport", () => {
 
     expect(transientSignal?.aborted).toBe(true);
     expect(transport.isOpen).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     expect(onClose).not.toHaveBeenCalled();
     transport.close();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("closes a connection attempt that never returns", async () => {
+    vi.useFakeTimers();
+    let openSignal: AbortSignal | null | undefined;
+    installFetch(async (input, init) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname === "/api/v1/room-connections" && init?.method === "POST") {
+        openSignal = init.signal;
+        return new Promise<Response>(() => undefined);
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url.pathname}`);
+    });
+    const onClose = vi.fn();
+    const transport = new RoomLongPollingTransport({ onClose, onMessage: vi.fn() });
+    const opening = transport.open();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await opening;
+
+    expect(openSignal?.aborted).toBe(true);
+    expect(transport.isOpen).toBe(false);
+    expect(onClose).toHaveBeenCalledWith({
+      code: 1006,
+      reason: "建立长轮询连接超时",
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("closes a poll that remains hung beyond the server wait window", async () => {
+    vi.useFakeTimers();
+    let pollSignal: AbortSignal | null | undefined;
+    installFetch(async (input, init) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname.endsWith("/poll") && init?.method === "POST") {
+        pollSignal = init.signal;
+        return new Promise<Response>(() => undefined);
+      }
+      return connectionResponse(url, init);
+    });
+    const onClose = vi.fn();
+    const transport = new RoomLongPollingTransport({ onClose, onMessage: vi.fn() });
+    await transport.open();
+
+    await vi.advanceTimersByTimeAsync(25_000);
+
+    expect(pollSignal?.aborted).toBe(true);
+    expect(transport.isOpen).toBe(false);
+    expect(onClose).toHaveBeenCalledWith({
+      code: 1006,
+      reason: "等待长轮询消息超时",
+    });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("closes an authoritative command that never returns", async () => {
+    vi.useFakeTimers();
+    let commandSignal: AbortSignal | null | undefined;
+    installFetch(async (input, init) => {
+      const url = new URL(String(input), window.location.origin);
+      if (url.pathname.endsWith("/commands") && init?.method === "POST") {
+        commandSignal = init.signal;
+        return new Promise<Response>(() => undefined);
+      }
+      if (url.pathname.endsWith("/poll") && init?.method === "POST") {
+        return new Promise<Response>(() => undefined);
+      }
+      return connectionResponse(url, init);
+    });
+    const onClose = vi.fn();
+    const transport = new RoomLongPollingTransport({ onClose, onMessage: vi.fn() });
+    await transport.open();
+    expect(transport.send(authoritativeCommand(5))).toBe(true);
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(commandSignal?.aborted).toBe(true);
+    expect(transport.isOpen).toBe(false);
+    expect(onClose).toHaveBeenCalledWith({
+      code: 1006,
+      reason: "提交房间命令超时",
+    });
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

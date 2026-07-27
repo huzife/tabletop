@@ -44,6 +44,8 @@ import type { RoomPublisher, RoomRuntimeLike } from "./types.js";
 
 const LONG_POLL_TIMEOUT_MS = 15_000;
 const LONG_POLL_LEASE_MS = 45_000;
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const PONG_TIMEOUT_MS = 10_000;
 const MAX_INBOUND_FRAMES_PER_WINDOW = 120;
 const INBOUND_FRAME_WINDOW_MS = 5_000;
 const MAX_TRANSIENT_WEBSOCKET_BUFFERED_BYTES = 256 * 1024;
@@ -102,7 +104,7 @@ export class RoomConnectionGateway implements RoomPublisher {
   start(): void {
     this.#registerLongPollingRoutes();
     this.#app.server.on("upgrade", this.#handleUpgrade);
-    this.#heartbeatTimer = setInterval(() => this.#heartbeat(), 20_000);
+    this.#heartbeatTimer = setInterval(() => this.#heartbeat(), HEARTBEAT_INTERVAL_MS);
     this.#heartbeatTimer.unref();
   }
 
@@ -150,6 +152,15 @@ export class RoomConnectionGateway implements RoomPublisher {
       });
       delete connection.memberId;
       delete connection.roomId;
+    }
+  }
+
+  disconnectConnection(connectionId: string, code: number, reason: string): void {
+    for (const connection of this.#connections.values()) {
+      if (connection.connectionId === connectionId) {
+        this.#closeConnection(connection, code, reason);
+        return;
+      }
     }
   }
 
@@ -398,8 +409,8 @@ export class RoomConnectionGateway implements RoomPublisher {
       messageId: ulid(),
       payload: {
         connectionId: connection.connectionId,
-        heartbeatIntervalMs: 20_000,
-        pongTimeoutMs: 10_000,
+        heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
+        pongTimeoutMs: PONG_TIMEOUT_MS,
       },
       protocol: 1,
       serverTime: new Date().toISOString(),
@@ -445,6 +456,10 @@ export class RoomConnectionGateway implements RoomPublisher {
       if (!this.#refreshIdentity(connection)) return;
       const command = clientCommandSchema.parse(parsedJson);
       requestId = command.requestId;
+      if (command.type === "connection.ping") {
+        await this.#dispatchCommand(connection, command, performance.now());
+        return;
+      }
       const seenRequests =
         command.type === "game.transient"
           ? connection.seenTransientRequests
@@ -471,6 +486,18 @@ export class RoomConnectionGateway implements RoomPublisher {
     command: ClientCommand,
     receivedAtMonotonicMs: number,
   ): Promise<void> {
+    if (command.type === "connection.ping") {
+      this.#send(connection, {
+        causedBy: command.requestId,
+        messageId: ulid(),
+        payload: {},
+        protocol: 1,
+        serverTime: new Date().toISOString(),
+        type: "connection.pong",
+      });
+      return;
+    }
+
     if (command.type === "room.join") {
       if (connection.roomId) {
         throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前连接已经加入房间");
@@ -760,7 +787,7 @@ export class RoomConnectionGateway implements RoomPublisher {
       if (connection.pongTimer) clearTimeout(connection.pongTimer);
       connection.pongTimer = setTimeout(() => {
         if (!connection.alive) connection.socket.terminate();
-      }, 10_000);
+      }, PONG_TIMEOUT_MS);
       connection.pongTimer.unref();
     }
   }

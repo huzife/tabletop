@@ -37,6 +37,13 @@ export const connectionReadyMessageSchema = z.strictObject({
   }),
 });
 
+export const connectionPongMessageSchema = z.strictObject({
+  ...serverEnvelopeFields,
+  type: z.literal("connection.pong"),
+  causedBy: requestIdSchema,
+  payload: z.strictObject({}),
+});
+
 export const commandAckMessageSchema = z.strictObject({
   ...serverEnvelopeFields,
   type: z.literal("command.ack"),
@@ -132,6 +139,7 @@ export const serviceStatusChangedMessageSchema = z.strictObject({
 
 export const serverMessageSchema = z.discriminatedUnion("type", [
   connectionReadyMessageSchema,
+  connectionPongMessageSchema,
   commandAckMessageSchema,
   commandErrorMessageSchema,
   roomSnapshotMessageSchema,
@@ -153,6 +161,7 @@ export type RoomSnapshotMessage<
 
 export type CommandAckMessage = z.infer<typeof commandAckMessageSchema>;
 export type CommandErrorMessage = z.infer<typeof commandErrorMessageSchema>;
+export type ConnectionPongMessage = z.infer<typeof connectionPongMessageSchema>;
 export type ConnectionReadyMessage = z.infer<typeof connectionReadyMessageSchema>;
 export type GameTransientMessage = z.infer<typeof gameTransientMessageSchema>;
 export type RoomClosedMessage = z.infer<typeof roomClosedMessageSchema>;

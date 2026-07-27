@@ -206,6 +206,93 @@ describe("RoomConnectionGateway", () => {
     }
   });
 
+  it("answers application-level WebSocket heartbeats", async () => {
+    const { origin, runtime, wsUrl } = await startTestRuntime(cleanups);
+    runtime.repositories.accounts.create({
+      passwordHash: await new PasswordService(1).hash("heartbeat-password"),
+      username: "心跳测试用户",
+    });
+    const cookies = await login(runtime, "心跳测试用户", "heartbeat-password");
+    const socket = await openSocket(wsUrl, origin, cookies, cleanups);
+    const requestId = ulid();
+    const pong = waitForServerMessage(
+      socket,
+      (message) => message.type === "connection.pong" && message.causedBy === requestId,
+    );
+
+    send(socket, {
+      payload: {},
+      protocol: 1,
+      requestId,
+      type: "connection.ping",
+    });
+
+    await expect(pong).resolves.toMatchObject({
+      causedBy: requestId,
+      payload: {},
+      type: "connection.pong",
+    });
+  });
+
+  it("lets a new same-session connection take over a stale room connection", async () => {
+    const { origin, runtime, wsUrl } = await startTestRuntime(cleanups);
+    runtime.repositories.accounts.create({
+      passwordHash: await new PasswordService(1).hash("takeover-password"),
+      username: "连接接管用户",
+    });
+    const cookies = await login(runtime, "连接接管用户", "takeover-password");
+    const createdResponse = await runtime.app.inject({
+      headers: unsafeHeaders(cookies, origin),
+      method: "POST",
+      payload: {
+        gameId: "gomoku",
+        name: "连接接管测试房",
+        practice: false,
+        settings: {
+          moveTimeSeconds: 60,
+          rule: "freestyle",
+          timerEnabled: false,
+          totalTimeMinutes: 10,
+        },
+      },
+      url: "/api/v1/rooms",
+    });
+    expect(createdResponse.statusCode).toBe(201);
+    const created = createdResponse.json() as { joinTicket: string; roomId: string };
+
+    const staleSocket = await openSocket(wsUrl, origin, cookies, cleanups);
+    const joined = waitForSnapshot(staleSocket, created.roomId);
+    send(staleSocket, {
+      payload: { joinTicket: created.joinTicket },
+      protocol: 1,
+      requestId: ulid(),
+      type: "room.join",
+    });
+    await joined;
+
+    const replacementSocket = await openSocket(wsUrl, origin, cookies, cleanups);
+    const staleClosed = waitForSocketClose(staleSocket);
+    const resumed = waitForSnapshot(replacementSocket, created.roomId, (message) =>
+      message.payload.members.some(({ connectionStatus }) => connectionStatus === "connected"),
+    );
+    send(replacementSocket, {
+      payload: { roomId: created.roomId },
+      protocol: 1,
+      requestId: ulid(),
+      type: "room.resume",
+    });
+
+    await expect(staleClosed).resolves.toMatchObject({
+      code: 4001,
+      reason: "连接已由同一设备接管",
+    });
+    await expect(resumed).resolves.toMatchObject({
+      roomId: created.roomId,
+      type: "room.snapshot",
+    });
+    expect(replacementSocket.readyState).toBe(WebSocket.OPEN);
+  });
+
   it("joins and runs revisioned commands through the HTTP long-polling fallback", async () => {
     const { origin, runtime } = await startTestRuntime(cleanups);
     runtime.repositories.accounts.create({

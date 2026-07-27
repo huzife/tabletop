@@ -92,6 +92,12 @@ describe("server message schemas", () => {
       },
       {
         ...base,
+        causedBy: requestId,
+        type: "connection.pong",
+        payload: {},
+      },
+      {
+        ...base,
         type: "command.ack",
         causedBy: requestId,
         payload: { stateChanged: false },

@@ -102,7 +102,7 @@ HTTP 层处理登录、会话、游戏目录、房间列表与创建、账号后
 - 校验单条大小、频率、`requestId` 和当前房间绑定。
 - 把房间命令提交给对应 `RoomSerialQueue`。
 - 按投影视图向玩家、观众或单个连接发送快照和事件。
-- WebSocket 心跳、长轮询租约与队列背压、断线通知和 30 秒重连关联。
+- WebSocket 控制帧与应用层心跳、长轮询请求超时/租约与队列背压、断线通知和 30 秒重连关联。
 
 两种传输共享命令限流、`requestId` 去重、房间绑定、命令分发和快照投影。网关不执行游戏规则，也不根据客户端声称的座位决定权限。座位控制权始终从房间成员状态查询。
 
@@ -141,7 +141,7 @@ Worker 请求包含插件生成并经 schema 校验的不可变自动化输入�
 
 ### 7.1 公共应用外壳
 
-公共外壳位于 `apps/web/src`，提供登录、首页、游戏目录、房间列表、创建房间、房间成员、准备、房主操作、观众列表、聊天、连接提示和管理后台。HTTP 访问集中在 `apps/web/src/api/client.ts`，房间连接集中在 `apps/web/src/rooms/use-room-socket.ts`；后者优先建立 WebSocket，建连失败或超时后使用 `apps/web/src/rooms/long-polling-transport.ts`。公共层不知道游戏棋盘内部状态，只保存协议定义的通用 `RoomSnapshotPayload`。
+公共外壳位于 `apps/web/src`，提供登录、首页、游戏目录、房间列表、创建房间、房间成员、准备、房主操作、观众列表、聊天、连接提示和管理后台。HTTP 访问集中在 `apps/web/src/api/client.ts`，房间连接集中在 `apps/web/src/rooms/use-room-socket.ts`；后者优先建立 WebSocket，以应用层心跳识别半开连接，按带随机抖动的递增间隔重试，并在 WebSocket 与 `apps/web/src/rooms/long-polling-transport.ts` 之间交替恢复。公共层不知道游戏棋盘内部状态，只保存协议定义的通用 `RoomSnapshotPayload`。
 
 ### 7.2 游戏界面模块
 
@@ -182,7 +182,7 @@ Worker 请求包含插件生成并经 schema 校验的不可变自动化输入�
 
 网络断开时，房间队列先把连接标记为不可用，并向游戏宿主提交 `connection.lost` 系统事件。插件可以请求启用兜底控制器，也可以保持座位等待；游戏计时、自动动作和其他状态变化均由插件转换结果决定。平台同时创建完整的 30 秒重连截止任务，把原 `sessionId + roomId` 作为恢复凭据；处于 `reconnecting` 的成员在窗口内仍视为具有恢复资格。
 
-原设备在窗口内连接时，平台取消截止任务，向插件提交 `connection.restored`，并向浏览器发送最新完整投影快照。插件已经接受的自动动作不会因网络恢复而回滚。下图展示可选临时接管、快照恢复和窗口到期三条通用路径。
+原设备在窗口内连接时，平台取消截止任务，向插件提交 `connection.restored`，并向浏览器发送最新完整投影快照。若浏览器已确认旧链路失效、服务端网络栈却仍把它视为在线，同一 `sessionId + roomId` 的新连接会直接替换旧 `connectionId`；旧连接随后到达的关闭事件因 ID 不匹配而被忽略。插件已经接受的自动动作不会因网络恢复而回滚。下图展示可选临时接管、快照恢复和窗口到期三条通用路径。
 
 ![图9-1 断线、可选临时接管与重连](images/architecture-fig03.png)
 

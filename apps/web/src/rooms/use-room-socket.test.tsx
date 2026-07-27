@@ -72,6 +72,7 @@ describe("useRoomSocket", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     Object.defineProperty(globalThis, "fetch", {
       configurable: true,
       value: NativeFetch,
@@ -169,6 +170,30 @@ describe("useRoomSocket", () => {
     });
     await waitFor(() => expect(commands).toHaveLength(2));
     expect(commands[1]).toMatchObject({ type: "room.seat.claim" });
+    view.unmount();
+  });
+
+  it("probes WebSocket again when the long-polling fallback also fails", async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: vi.fn(async () => {
+        throw new TypeError("network unavailable");
+      }),
+      writable: true,
+    });
+    const view = render(<Harness />);
+    const first = FakeWebSocket.instances[0];
+
+    act(() => first?.close(1006, "handshake failed"));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(125);
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    random.mockRestore();
     view.unmount();
   });
 
@@ -362,12 +387,77 @@ describe("useRoomSocket", () => {
     const view = render(<Harness />);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(5_000);
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(250);
     });
 
     expect(latest?.connectionStatus).toBe("connected");
     expect(commands[0]).toMatchObject({ type: "room.join" });
+    view.unmount();
+  });
+
+  it("abandons a silent WebSocket after an application heartbeat timeout", async () => {
+    const { commands } = installLongPollingFetch();
+    vi.useFakeTimers();
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage(roomSnapshotMessage()));
+    expect(latest?.connectionStatus).toBe("connected");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(readSentCommands(socket).at(-1)).toMatchObject({
+      payload: {},
+      type: "connection.ping",
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_250);
+    });
+
+    expect(latest?.connectionStatus).toBe("connected");
+    expect(commands[0]).toMatchObject({
+      payload: { roomId: ROOM_ID },
+      type: "room.resume",
+    });
+    view.unmount();
+  });
+
+  it("keeps the WebSocket when the application heartbeat is acknowledged", async () => {
+    vi.useFakeTimers();
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage(roomSnapshotMessage()));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    const ping = readSentCommands(socket).at(-1) as
+      { readonly requestId?: string; readonly type?: string } | undefined;
+    expect(ping).toMatchObject({ type: "connection.ping" });
+    if (ping?.requestId === undefined) throw new Error("应用心跳缺少 requestId");
+
+    act(() =>
+      socket?.serverMessage({
+        causedBy: ping.requestId,
+        messageId: "00000000-0000-4000-8000-000000000005",
+        payload: {},
+        protocol: 1,
+        serverTime: "2026-07-16T10:00:21.000Z",
+        type: "connection.pong",
+      }),
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(latest?.connectionStatus).toBe("connected");
+    expect(latest?.pendingCommandTypes).toEqual([]);
     view.unmount();
   });
 });

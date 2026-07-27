@@ -148,17 +148,21 @@ export class RoomRuntime {
         member.connectionStatus === "reconnecting" &&
         member.reconnectUntil !== undefined &&
         member.reconnectUntil > Date.now();
-      if (!initialAttachment && !restoringConnection) {
+      const takingOverConnection =
+        member.connectionStatus === "connected" &&
+        member.connectionId !== undefined &&
+        member.connectionId !== connectionId;
+      if (!initialAttachment && !restoringConnection && !takingOverConnection) {
         throw new HttpError(409, "ROOM_INVALID_STATE", "房间重连窗口已经结束");
       }
       const previousConnectionId = member.connectionId;
-      if (previousConnectionId && previousConnectionId !== connectionId) {
-        this.#publisher.disconnectMember(memberId, 4001, "连接已由同一设备接管");
-      }
       member.connectionId = connectionId;
       member.connectionStatus = "connected";
       delete member.reconnectUntil;
       this.#clearReconnectTimer(memberId);
+      if (takingOverConnection && previousConnectionId !== undefined) {
+        this.#publisher.disconnectConnection(previousConnectionId, 4001, "连接已由同一设备接管");
+      }
       const seat = this.#seatForMember(memberId);
       const events =
         restoringConnection && seat

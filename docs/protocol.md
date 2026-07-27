@@ -98,15 +98,15 @@
 
 1. 校验 Origin、协议版本、会话和全站状态。
 2. 分配 `connectionId`，加载 `accountId` 与 `sessionId`。
-3. 发送 `connection.ready`，包含服务端 UTC 时间和心跳参数。
+3. 发送 `connection.ready`，包含服务端 UTC 时间和应用层心跳参数。
 4. 客户端使用 join ticket 提交 `room.join`，或在重连时提交原房间恢复信息。
 5. 服务端建立成员绑定后发送完整 `room.snapshot`。
 
-每个 `connectionId` 最多绑定一个房间。同一 `sessionId` 可以为多个不同房间分别建立 WebSocket 或长轮询连接，成员恢复绑定按 `sessionId + roomId` 区分；新建一个房间连接不会接管该会话在其他房间的连接。
+每个 `connectionId` 最多绑定一个房间。同一 `sessionId` 可以为多个不同房间分别建立 WebSocket 或长轮询连接，成员恢复绑定按 `sessionId + roomId` 区分；新建一个房间连接不会接管该会话在其他房间的连接。若旧连接处于网络半开状态，同一 `sessionId + roomId` 的新连接发送 `room.resume` 后可以直接替换旧 `connectionId`，网关按 ID 精确关闭被替换的连接，不会误关正在排队恢复的其他新连接。
 
 升级握手后，每个客户端帧先经过不解析载荷的连接级总限流，再解析最小 JSON 信封以选择普通命令或临时事件子限流通道，随后重新验证会话并执行完整 Zod 与房间命令处理；心跳也会周期重验会话。二进制、损坏 JSON 和超限帧不会绕过第一层保护。这样注销、改密、管理员重置或自然过期会关闭已有连接，同时超限帧不会先触发数据库查询。
 
-若 WebSocket 构造或握手失败，或者建立后 5 秒内仍未收到首个房间快照，浏览器自动切换到同源 HTTP 长轮询。已经成功收到过快照的 WebSocket 断开时，客户端先尝试恢复一次 WebSocket；新连接仍无法取得快照时再切换长轮询。这个选择只改变传输，不改变 `connectionId`、命令信封、请求去重、房间绑定、快照或重连语义。
+若 WebSocket 构造或握手失败，或者建立后 10 秒内仍未收到首个房间快照，浏览器自动切换到同源 HTTP 长轮询。已经成功收到过快照的 WebSocket 断开时，客户端先尝试恢复 WebSocket；新连接仍无法取得快照时再切换长轮询。长轮询本身建连或运行失败后会重新探测 WebSocket，避免一次偶发故障把页面永久固定在不可用的传输上。重试采用带随机抖动、上限 8 秒的递增间隔；浏览器的传输恢复预算覆盖服务端识别半开连接所需的心跳周期和随后 30 秒业务窗口，但是否仍有房间恢复资格始终以服务端答复为准。这个选择只改变传输，不改变 `connectionId`、命令信封、请求去重、房间绑定、快照或重连语义。
 
 长轮询使用以下认证写接口，全部要求当前会话、同源 Origin、CSRF Cookie 与请求头：
 
@@ -117,9 +117,9 @@
 | `POST /api/v1/room-connections/:connectionId/commands` | 提交与 WebSocket 完全相同的 `ClientCommand`；`202` 只表示网关接收，业务结果仍由消息返回 |
 | `DELETE /api/v1/room-connections/:connectionId` | 页面离开时主动关闭连接 |
 
-同一长轮询连接只允许一个等待中的 poll，请求或命令会刷新 45 秒连接租约；同一会话可以为不同房间同时维护多条长轮询连接。服务端出站队列最多保留 128 条消息；没有 `causedBy` 的同房间完整快照可以被更新版本替换，同一座位排队中的 `game.transient` 只保留最新值并维持其实际发送顺序。临时事件在队列满时直接丢弃；确认、错误、快照等权威消息会先淘汰一条排队中的临时事件，只有队列全部为不可丢弃消息时才关闭慢连接。租约到期同样会进入正常的 30 秒房间重连流程。
+同一长轮询连接只允许一个等待中的 poll，请求或命令会刷新 45 秒连接租约；同一会话可以为不同房间同时维护多条长轮询连接。浏览器把建连和权威命令限制为 10 秒，把单次 poll 限制为 25 秒；后者高于服务端正常的 15 秒等待，既允许合理网络延迟，也能识别被代理或网络栈永久挂起的请求。服务端出站队列最多保留 128 条消息；没有 `causedBy` 的同房间完整快照可以被更新版本替换，同一座位排队中的 `game.transient` 只保留最新值并维持其实际发送顺序。临时事件在队列满时直接丢弃；确认、错误、快照等权威消息会先淘汰一条排队中的临时事件，只有队列全部为不可丢弃消息时才关闭慢连接。租约到期同样会进入正常的 30 秒房间重连流程。
 
-WebSocket 心跳由服务端每 20 秒发送 ping，10 秒内没有 pong 则关闭连接。当前房间页面为该页面生命周期建立一条活动房间连接；离开页面会关闭连接，重新进入或网络中断后创建新连接。
+WebSocket 使用两层心跳：服务端每 20 秒发送协议控制帧 ping，10 秒内没有 pong 则关闭连接；浏览器在 20 秒没有应用消息时发送 `connection.ping`，10 秒内没有收到对应 `connection.pong` 就主动放弃半开 WebSocket 并改用长轮询。浏览器从离线恢复或页面重新可见时会立即重新检查连接。当前房间页面为该页面生命周期建立一条活动房间连接；离开页面会关闭连接，重新进入或网络中断后创建新连接。
 
 ## 7. 消息信封
 
@@ -155,16 +155,17 @@ interface ServerMessage<TPayload> {
 }
 ```
 
-`causedBy` 指向客户端 `requestId`，便于客户端结束提交状态。当前 `command.ack` 和 `command.error` 必须携带该字段，`room.snapshot` 可以省略；没有客户端来源的计时、AI 和服务关闭消息不设置该字段。
+`causedBy` 指向客户端 `requestId`，便于客户端关联响应或结束提交状态。当前 `connection.pong`、`command.ack` 和 `command.error` 必须携带该字段，`room.snapshot` 可以省略；没有客户端来源的计时、AI 和服务关闭消息不设置该字段。
 
 ## 8. 客户端命令
 
-### 8.1 通用房间命令
+### 8.1 连接与通用房间命令
 
 | 类型 | 主要载荷 | 说明 |
 | --- | --- | --- |
+| `connection.ping` | 空 | WebSocket 应用层存活探测，不绑定房间、不进入权威命令待处理队列 |
 | `room.join` | `joinTicket` | 首次建立房间成员身份，普通加入默认为观众 |
-| `room.resume` | `roomId` | 按 `sessionId + roomId` 在 30 秒窗口内恢复，或完成该房间已预绑定但从未 attach 的首次连接 |
+| `room.resume` | `roomId` | 按 `sessionId + roomId` 在 30 秒窗口内恢复、接管尚未被判定断开的旧连接，或完成该房间已预绑定但从未 attach 的首次连接 |
 | `room.leave` | 空 | 主动离开，不进入重连窗口 |
 | `room.rename` | `name` | 房主修改房间名，有效长度 1～30 个 Unicode 字符 |
 | `room.settings.update` | `settings` | 房主在允许阶段修改游戏设置 |
@@ -215,13 +216,14 @@ WebSocket 客户端会合并并限频临时事件；发送缓冲明显积压时�
 | 类型 | 用途 |
 | --- | --- |
 | `connection.ready` | 建连完成与心跳参数 |
+| `connection.pong` | 对应用层 `connection.ping` 的关联响应 |
 | `command.ack` | 命令成功确认；`payload.stateChanged` 表示是否改变房间状态 |
 | `command.error` | 稳定错误码、公开参数和是否应重新同步 |
 | `room.snapshot` | 当前接收者的完整房间、聊天和游戏投影视图 |
 | `room.closed` | 服务关闭、房间已无 `connected` 或 `reconnecting` 成员、空座 `soloPractice` 练习房、或内部错误导致房间终止 |
 | `game.transient` | 由服务端标记发送座位的临时游戏展示事件；不代表权威状态变化 |
 
-除尽力转发的 `game.transient` 外，每个成功命令都产生 `command.ack`，其中 `causedBy` 等于请求的 `requestId`，`stateChanged` 为布尔值；状态变化还会向在线成员广播接收者专属的 `room.snapshot`。客户端不能把“收到快照”当作唯一成功确认，也不能把 `stateChanged: false` 当作失败。
+除以 `connection.pong` 响应的 `connection.ping` 和尽力转发的 `game.transient` 外，每个成功命令都产生 `command.ack`，其中 `causedBy` 等于请求的 `requestId`，`stateChanged` 为布尔值；状态变化还会向在线成员广播接收者专属的 `room.snapshot`。客户端不能把“收到快照”当作唯一成功确认，也不能把 `stateChanged: false` 当作失败。
 
 `room.snapshot` 信封携带 `roomId`、可选 `matchId` 和 `revision`；payload 包含游戏 ID、公共房间信息、成员与连接状态、座位与控制器、房主、准备状态、最近 100 条聊天、游戏设置、当前接收者的 `gameView`、通用房间权限和本次 `displayEvents`。观众通过 `members[].role = "spectator"` 表达，不存在第二份观众列表。`room.seat.reclaim` 等可选命令必须由快照权限显式开放。
 
@@ -257,7 +259,7 @@ WebSocket 客户端会合并并限频临时事件；发送缓冲明显积压时�
 
 ## 11. 重连协议
 
-断线时，目标房间按 `sessionId + roomId` 保存原成员和座位恢复信息。房间队列同时向插件提交 `connection.lost` 系统事件；插件可以请求临时自动控制，也可以选择其他自身支持的状态变化。浏览器重新建立 WebSocket 或长轮询连接后发送 `room.resume`，服务端必须确认账号、原会话、目标房间和仍有效的恢复窗口匹配；同一会话在其他房间的绑定不能用于恢复当前房间。若首次 join 是否送达无法确认，已在该房间预绑定但从未 attach 的原会话也可以 resume；这种情况只完成连接，不发送 `connection.restored` 游戏系统事件，并取消尚存的创建 ticket 定时器。
+断线时，目标房间按 `sessionId + roomId` 保存原成员和座位恢复信息。房间队列同时向插件提交 `connection.lost` 系统事件；插件可以请求临时自动控制，也可以选择其他自身支持的状态变化。浏览器重新建立 WebSocket 或长轮询连接后发送 `room.resume`，服务端必须确认账号、原会话和目标房间；已进入 `reconnecting` 的成员还必须处于有效恢复窗口。同一会话在其他房间的绑定不能用于恢复当前房间。若浏览器先发现链路不可用而服务端仍把旧 `connectionId` 视为 `connected`，新连接直接接管；旧连接的关闭回调会因 ID 已变化而成为无操作，不产生虚假的 `connection.lost`。若首次 join 是否送达无法确认，已在该房间预绑定但从未 attach 的原会话也可以 resume；这种情况只完成连接，不发送 `connection.restored` 游戏系统事件，并取消尚存的创建 ticket 定时器。
 
 ![图11-1 断线、可选临时接管与快照恢复时序](images/protocol-fig02.png)
 

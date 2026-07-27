@@ -14,6 +14,7 @@ const revisioned = { ...room, expectedRevision: 4 } as const;
 describe("client command schemas", () => {
   it("covers every v1 room and game command", () => {
     const commands = [
+      { ...common, type: "connection.ping", payload: {} },
       { ...common, type: "room.join", payload: { joinTicket: "a".repeat(22) } },
       { ...common, type: "room.resume", payload: { roomId: "room-test" } },
       { ...room, type: "room.leave", payload: {} },

@@ -89,6 +89,7 @@ export interface RoomState {
 export interface RoomPublisher {
   publishSnapshot(room: RoomRuntimeLike, events: readonly JsonValue[]): void;
   publishClosed(roomId: RoomId, reason: string, message: string): void;
+  disconnectConnection(connectionId: string, code: number, reason: string): void;
   disconnectMember(memberId: MemberId, code: number, reason: string): void;
 }
 

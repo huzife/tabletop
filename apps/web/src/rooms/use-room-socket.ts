@@ -4,6 +4,7 @@ import {
   roomIdSchema,
   serverMessageSchema,
   type ClientCommand,
+  type ConnectionPingCommand,
   type GameTransientCommand,
   type JsonObject,
   type MatchId,
@@ -19,15 +20,15 @@ import { webGameRegistry } from "../games/registry";
 import { consumeStoredJoinTicket } from "./entry-context";
 import { RoomLongPollingTransport, type LongPollingTransportClose } from "./long-polling-transport";
 
-const RECONNECT_WINDOW_MS = 30_000;
-const RECONNECT_DELAYS_MS = [0, 500, 1_000, 2_000, 3_000, 5_000] as const;
+const CLIENT_RECOVERY_TIMEOUT_MS = 70_000;
+const RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000, 8_000] as const;
 const TRANSIENT_BACKPRESSURE_RETRY_MS = 250;
 const WEB_SOCKET_TRANSIENT_BACKPRESSURE_BYTES = 64 * 1024;
-const WEB_SOCKET_ESTABLISH_TIMEOUT_MS = 5_000;
+const WEB_SOCKET_ESTABLISH_TIMEOUT_MS = 10_000;
 
 type ManagedCommand = Exclude<
   ClientCommand,
-  RoomJoinCommand | RoomResumeCommand | GameTransientCommand
+  ConnectionPingCommand | RoomJoinCommand | RoomResumeCommand | GameTransientCommand
 >;
 type StripManagedEnvelope<T> = T extends ManagedCommand
   ? Omit<T, "protocol" | "requestId" | "roomId">
@@ -91,6 +92,11 @@ function webSocketUrl(): string {
   return url.href;
 }
 
+function reconnectDelayMs(attempt: number): number {
+  const ceiling = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)] ?? 8_000;
+  return Math.floor(ceiling / 2 + Math.random() * (ceiling / 2));
+}
+
 function socketError(
   code: string,
   message: string,
@@ -146,6 +152,13 @@ export function useRoomSocket(
     let reconnectExpiryTimer: number | undefined;
     let reconnectTimer: number | undefined;
     let webSocketEstablishTimer: number | undefined;
+    let heartbeatSendTimer: number | undefined;
+    let heartbeatResponseTimer: number | undefined;
+    let heartbeatIntervalMs = 20_000;
+    let heartbeatPongTimeoutMs = 10_000;
+    let heartbeatRequestId: RequestId | undefined;
+    let lastServerActivityAt = Date.now();
+    let offlineObserved = false;
     let socket: WebSocket | null = null;
     let polling: RoomLongPollingTransport | null = null;
     let preferLongPolling = false;
@@ -172,19 +185,33 @@ export function useRoomSocket(
       window.clearTimeout(webSocketEstablishTimer);
       webSocketEstablishTimer = undefined;
     };
+    const clearHeartbeat = () => {
+      if (heartbeatSendTimer !== undefined) window.clearTimeout(heartbeatSendTimer);
+      if (heartbeatResponseTimer !== undefined) window.clearTimeout(heartbeatResponseTimer);
+      heartbeatSendTimer = undefined;
+      heartbeatResponseTimer = undefined;
+      heartbeatRequestId = undefined;
+    };
     const ensureReconnectDeadline = () => {
-      if (reconnectDeadline === 0) reconnectDeadline = Date.now() + RECONNECT_WINDOW_MS;
+      if (reconnectDeadline === 0) {
+        reconnectDeadline = Date.now() + CLIENT_RECOVERY_TIMEOUT_MS;
+      }
       clearReconnectExpiry();
       reconnectExpiryTimer = window.setTimeout(
         () => {
           if (disposed || intentionalClose || reconnectDeadline === 0) return;
           reconnectDeadline = 0;
           intentionalClose = true;
+          clearHeartbeat();
           clearPending();
           setConnectionStatus("offline");
-          setError(socketError("SOCKET_RECONNECT_EXPIRED", "30 秒内未能恢复房间连接"));
-          socket?.close(4000, "重连窗口已结束");
-          polling?.close();
+          setError(socketError("SOCKET_RECONNECT_EXPIRED", "连接恢复超时，请手动重试"));
+          if (socket !== null) abandonWebSocket(socket, "连接恢复超时", false);
+          if (polling !== null) {
+            const expiredPolling = polling;
+            polling = null;
+            expiredPolling.close();
+          }
         },
         Math.max(0, reconnectDeadline - Date.now()),
       );
@@ -216,13 +243,66 @@ export function useRoomSocket(
       }
     };
     const isWebSocketOpen = () => socket !== null && socket.readyState === WebSocket.OPEN;
-    const isTransportOpen = () => isWebSocketOpen() || polling?.isOpen === true;
+    const isTransportOpen = () =>
+      !offlineObserved &&
+      navigator.onLine !== false &&
+      (isWebSocketOpen() || polling?.isOpen === true);
     const sendTransport = (command: ClientCommand): boolean => {
       if (isWebSocketOpen() && socket !== null) {
         socket.send(JSON.stringify(command));
         return true;
       }
       return polling?.send(command) ?? false;
+    };
+    const scheduleWebSocketHeartbeat = () => {
+      if (disposed || intentionalClose || !isWebSocketOpen() || heartbeatRequestId !== undefined) {
+        return;
+      }
+      if (heartbeatSendTimer !== undefined) window.clearTimeout(heartbeatSendTimer);
+      const delayMs = Math.max(0, lastServerActivityAt + heartbeatIntervalMs - Date.now());
+      heartbeatSendTimer = window.setTimeout(() => {
+        heartbeatSendTimer = undefined;
+        const activeSocket = socket;
+        if (
+          disposed ||
+          intentionalClose ||
+          activeSocket === null ||
+          activeSocket.readyState !== WebSocket.OPEN
+        ) {
+          return;
+        }
+        const command = clientCommandSchema.parse({
+          payload: {},
+          protocol: 1,
+          requestId: createRequestId(),
+          type: "connection.ping",
+        });
+        heartbeatRequestId = command.requestId;
+        try {
+          activeSocket.send(JSON.stringify(command));
+        } catch {
+          abandonWebSocket(activeSocket, "WebSocket 心跳发送失败", true);
+          return;
+        }
+        heartbeatResponseTimer = window.setTimeout(() => {
+          if (socket === activeSocket && heartbeatRequestId === command.requestId) {
+            abandonWebSocket(activeSocket, "WebSocket 心跳超时", true);
+          }
+        }, heartbeatPongTimeoutMs);
+      }, delayMs);
+    };
+    const recordServerActivity = () => {
+      lastServerActivityAt = Date.now();
+      if (heartbeatRequestId === undefined) scheduleWebSocketHeartbeat();
+    };
+    const acceptHeartbeatPong = (requestId: RequestId) => {
+      if (requestId !== heartbeatRequestId) return;
+      if (heartbeatResponseTimer !== undefined) {
+        window.clearTimeout(heartbeatResponseTimer);
+      }
+      heartbeatResponseTimer = undefined;
+      heartbeatRequestId = undefined;
+      scheduleWebSocketHeartbeat();
     };
     const clearQueuedTransient = () => {
       queuedTransient = null;
@@ -262,6 +342,7 @@ export function useRoomSocket(
       return true;
     };
     const closeTransport = (code: number, reason: string) => {
+      clearHeartbeat();
       clearQueuedTransient();
       socket?.close(code, reason);
       polling?.close();
@@ -354,10 +435,20 @@ export function useRoomSocket(
         return;
       }
       const message = parsed.data;
+      recordServerActivity();
 
       switch (message.type) {
         case "connection.ready":
+          heartbeatIntervalMs = Math.min(
+            60_000,
+            Math.max(5_000, message.payload.heartbeatIntervalMs),
+          );
+          heartbeatPongTimeoutMs = Math.min(30_000, Math.max(2_000, message.payload.pongTimeoutMs));
+          scheduleWebSocketHeartbeat();
           sendEntryCommand();
+          break;
+        case "connection.pong":
+          acceptHeartbeatPong(message.causedBy);
           break;
         case "command.ack":
           transientRequests.delete(message.causedBy);
@@ -365,6 +456,10 @@ export function useRoomSocket(
           sentCommands.delete(message.causedBy);
           break;
         case "command.error": {
+          if (message.causedBy === heartbeatRequestId) {
+            acceptHeartbeatPong(message.causedBy);
+            break;
+          }
           if (transientRequests.delete(message.causedBy)) break;
           const failedCommand = sentCommands.get(message.causedBy);
           removePending(message.causedBy);
@@ -375,15 +470,6 @@ export function useRoomSocket(
             entryState.ambiguousJoin = false;
           }
 
-          if (
-            failedCommand?.type === "room.resume" &&
-            message.payload.code === "ROOM_INVALID_STATE" &&
-            Date.now() < reconnectDeadline &&
-            isTransportOpen()
-          ) {
-            window.setTimeout(sendResume, 250);
-            break;
-          }
           if (
             failedCommand?.type === "room.resume" &&
             message.payload.code === "ROOM_PERMISSION_DENIED" &&
@@ -495,16 +581,18 @@ export function useRoomSocket(
         clearReconnectExpiry();
         reconnectDeadline = 0;
         setConnectionStatus("offline");
-        setError(socketError("SOCKET_RECONNECT_EXPIRED", "30 秒内未能恢复房间连接"));
+        setError(socketError("SOCKET_RECONNECT_EXPIRED", "连接恢复超时，请手动重试"));
         return;
       }
-      const delay = RECONNECT_DELAYS_MS[Math.min(reconnectAttempt, RECONNECT_DELAYS_MS.length - 1)];
+      const delay = reconnectDelayMs(reconnectAttempt);
       reconnectAttempt += 1;
       setConnectionStatus("reconnecting");
+      if (navigator.onLine === false) return;
       reconnectTimer = window.setTimeout(connect, delay);
     };
 
     const handleTransportClose = (event: LongPollingTransportClose) => {
+      clearHeartbeat();
       clearPending();
       clearQueuedTransient();
       transientRequests.clear();
@@ -540,11 +628,13 @@ export function useRoomSocket(
 
     const connectLongPolling = () => {
       clearWebSocketEstablishTimer();
+      clearHeartbeat();
       const connectedPolling = new RoomLongPollingTransport({
         onClose: (event) => {
           if (polling !== connectedPolling) return;
           polling = null;
           currentTransportHadSnapshot = false;
+          preferLongPolling = false;
           handleTransportClose(event);
         },
         onMessage: (message) => {
@@ -556,6 +646,26 @@ export function useRoomSocket(
       void connectedPolling.open();
     };
 
+    function abandonWebSocket(
+      connectedSocket: WebSocket,
+      reason: string,
+      useLongPollingNext: boolean,
+    ) {
+      if (socket !== connectedSocket) return;
+      clearWebSocketEstablishTimer();
+      clearHeartbeat();
+      if (useLongPollingNext) preferLongPolling = true;
+      socket = null;
+      currentTransportHadSnapshot = false;
+      if (socketRef.current === connectedSocket) socketRef.current = null;
+      try {
+        connectedSocket.close(4000, reason);
+      } catch {
+        // A browser policy can reject operations on a disabled WebSocket implementation.
+      }
+      handleTransportClose({ code: 1006, reason });
+    }
+
     const connectWebSocket = () => {
       let connectedSocket: WebSocket;
       try {
@@ -563,6 +673,8 @@ export function useRoomSocket(
         socket = connectedSocket;
         socketRef.current = connectedSocket;
         currentTransportHadSnapshot = false;
+        clearHeartbeat();
+        lastServerActivityAt = Date.now();
         clearWebSocketEstablishTimer();
         webSocketEstablishTimer = window.setTimeout(() => {
           if (
@@ -573,15 +685,7 @@ export function useRoomSocket(
           ) {
             return;
           }
-          preferLongPolling = true;
-          socket = null;
-          if (socketRef.current === connectedSocket) socketRef.current = null;
-          try {
-            connectedSocket.close(4000, "WebSocket 建连超时");
-          } catch {
-            // A browser policy can reject operations on a disabled WebSocket implementation.
-          }
-          handleTransportClose({ code: 1006, reason: "WebSocket 建连超时" });
+          abandonWebSocket(connectedSocket, "WebSocket 建连超时", true);
         }, WEB_SOCKET_ESTABLISH_TIMEOUT_MS);
       } catch {
         preferLongPolling = true;
@@ -613,6 +717,7 @@ export function useRoomSocket(
       });
       connectedSocket.addEventListener("close", (event) => {
         clearWebSocketEstablishTimer();
+        clearHeartbeat();
         if (socketRef.current === connectedSocket) socketRef.current = null;
         if (socket !== connectedSocket) return;
         const failedBeforeSnapshot = !currentTransportHadSnapshot;
@@ -628,6 +733,11 @@ export function useRoomSocket(
 
     function connect() {
       if (disposed || intentionalClose) return;
+      if (navigator.onLine === false) {
+        ensureReconnectDeadline();
+        setConnectionStatus("reconnecting");
+        return;
+      }
       if (socket !== null && socket.readyState !== WebSocket.CLOSED) return;
       if (polling !== null) return;
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
@@ -647,6 +757,7 @@ export function useRoomSocket(
       });
       if (
         !parsed.success ||
+        parsed.data.type === "connection.ping" ||
         parsed.data.type === "room.join" ||
         parsed.data.type === "room.resume" ||
         parsed.data.type === "game.transient"
@@ -675,28 +786,62 @@ export function useRoomSocket(
     retryRef.current = () => {
       intentionalClose = false;
       reconnectAttempt = 0;
-      reconnectDeadline = Date.now() + RECONNECT_WINDOW_MS;
+      reconnectDeadline = Date.now() + CLIENT_RECOVERY_TIMEOUT_MS;
       preferLongPolling = false;
       ensureReconnectDeadline();
       setError(null);
       setConnectionStatus("reconnecting");
-      if (
-        socket !== null &&
-        (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)
-      ) {
-        socket.close(4000, "重新连接");
+      if (socket !== null) {
+        if (socket.readyState !== WebSocket.CLOSED) {
+          abandonWebSocket(socket, "手动重新连接", false);
+          return;
+        }
+        if (socketRef.current === socket) socketRef.current = null;
+        socket = null;
+      }
+      if (polling !== null) {
+        const previousPolling = polling;
+        polling = null;
+        previousPolling.close();
+        handleTransportClose({ code: 1006, reason: "手动重新连接" });
+        return;
+      }
+      connect();
+    };
+
+    const handleOffline = () => {
+      if (disposed || intentionalClose) return;
+      offlineObserved = true;
+      setConnectionStatus("reconnecting");
+    };
+    const handleOnline = () => {
+      if (!offlineObserved) {
+        connect();
+        return;
+      }
+      offlineObserved = false;
+      preferLongPolling = false;
+      if (socket !== null) {
+        abandonWebSocket(socket, "网络已恢复，刷新连接", false);
         return;
       }
       if (polling !== null) {
         const previousPolling = polling;
         polling = null;
         previousPolling.close();
+        handleTransportClose({ code: 1006, reason: "网络已恢复，刷新连接" });
+        return;
       }
       connect();
     };
-
-    const handleOnline = () => connect();
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      if (isWebSocketOpen()) scheduleWebSocketHeartbeat();
+      else connect();
+    };
+    window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     connect();
 
     return () => {
@@ -707,9 +852,12 @@ export function useRoomSocket(
         entryState.joinInFlight = false;
         entryState.ambiguousJoin = true;
       }
+      window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearReconnectExpiry();
       clearWebSocketEstablishTimer();
+      clearHeartbeat();
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
       clearPending();
       socket?.close(1000, "页面已离开");

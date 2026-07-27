@@ -325,6 +325,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     });
     let snapshotCount = 0;
     const publisher: RoomPublisher = {
+      disconnectConnection: () => undefined,
       disconnectMember: () => undefined,
       publishClosed: () => undefined,
       publishSnapshot: () => {
@@ -661,6 +662,53 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(created.room.destroyed).toBe(false);
     expect(created.room.state.members.get(binding.memberId)).toMatchObject({
       connectionId: "connection-initial-resume",
+      connectionStatus: "connected",
+    });
+    created.room.destroy("host_closed", "测试结束");
+  });
+
+  it("lets a new transport take over a stale connected transport from the same session", async () => {
+    const { accounts, registry, sessions } = createTestRegistry(closers);
+    const disconnectConnection = vi.fn();
+    registry.setPublisher({
+      disconnectConnection,
+      disconnectMember: () => undefined,
+      publishClosed: () => undefined,
+      publishSnapshot: () => undefined,
+    });
+    const account = accounts[0]!;
+    const session = sessions[0]!;
+    const created = await registry.createRoom({
+      account,
+      gameId: "test-room",
+      name: "连接接管测试房",
+      practice: false,
+      session,
+      settings: {},
+    });
+    const joined = await registry.consumeJoinTicket(created.ticket.token, account, session);
+    await created.room.attachConnection(joined.member.memberId, "connection-stale");
+    registry.confirmMemberAttached(joined.member.memberId);
+
+    await created.room.resume(
+      joined.member.memberId,
+      sessionIdSchema.parse(session.id),
+      "connection-replacement",
+    );
+
+    expect(created.room.state.members.get(joined.member.memberId)).toMatchObject({
+      connectionId: "connection-replacement",
+      connectionStatus: "connected",
+    });
+    expect(disconnectConnection).toHaveBeenCalledWith(
+      "connection-stale",
+      4001,
+      "连接已由同一设备接管",
+    );
+
+    await created.room.connectionLost(joined.member.memberId, "connection-stale");
+    expect(created.room.state.members.get(joined.member.memberId)).toMatchObject({
+      connectionId: "connection-replacement",
       connectionStatus: "connected",
     });
     created.room.destroy("host_closed", "测试结束");
