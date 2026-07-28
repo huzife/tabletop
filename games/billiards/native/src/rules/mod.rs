@@ -6,13 +6,12 @@
 //! respotted-black procedure needs a toss, the caller supplies the selected
 //! seat index through [`ReducerContext`].
 
-pub const RULES_VERSION: &str = "tabletop-billiards-rules-v1";
+pub const RULES_VERSION: &str = "tabletop-billiards-rules-v2";
 
 mod common;
 mod eight_ball;
 mod error;
 mod placement;
-mod practice;
 mod reducer;
 mod setup;
 mod snooker;
@@ -24,7 +23,6 @@ pub use eight_ball::{
 };
 pub use error::{RuleError, RuleErrorKind, RuleResult};
 pub use placement::{check_cue_placement, place_cue_ball};
-pub use practice::adjudicate_practice_shot;
 pub use reducer::{ReducerContext, reduce_billiards_action};
 pub use setup::{
     create_chinese_eight_ball_rack, create_initial_balls, create_initial_billiards_state,

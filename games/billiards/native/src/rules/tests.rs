@@ -185,8 +185,23 @@ fn initial_racks_and_match_states_follow_the_native_table_profile() {
         Some(BallInHandZone::D)
     );
     assert_eq!(
-        practice_state(BilliardsMode::ChineseEightBall).players[0].group,
-        None
+        practice_state(BilliardsMode::ChineseEightBall).players,
+        vec![
+            BilliardsPlayerState {
+                seat_id: SEAT_ONE.to_owned(),
+                group: Some(EightBallGroup::Open),
+                score: 0,
+            },
+            BilliardsPlayerState {
+                seat_id: SEAT_TWO.to_owned(),
+                group: Some(EightBallGroup::Open),
+                score: 0,
+            },
+        ]
+    );
+    assert_eq!(
+        practice_state(BilliardsMode::Snooker).snooker_on,
+        Some(SnookerOn::Red)
     );
 }
 
@@ -247,25 +262,20 @@ fn cue_placement_checks_bounds_zones_pockets_and_overlap() {
 }
 
 #[test]
-fn practice_keeps_the_player_and_puts_a_scratched_cue_in_hand() {
-    let state = ready_to_shoot(practice_state(BilliardsMode::ChineseEightBall));
-    let input = input(state, shot(None), &["1"], &["1", "cue"], &[], &[]);
-    let result = adjudicate_practice_shot(&input).expect("practice shot");
-    assert_eq!(result.foul_code, None);
-    assert_eq!(result.state.active_seat_id.as_deref(), Some(SEAT_ONE));
+fn practice_uses_competitive_fouls_and_turn_rotation() {
+    let mut state = ready_to_shoot(practice_state(BilliardsMode::ChineseEightBall));
+    state.break_shot = false;
+    state.players[0].group = Some(EightBallGroup::Solids);
+    state.players[1].group = Some(EightBallGroup::Stripes);
+    let input = input(state, shot(None), &["9"], &[], &["9"], &[]);
+    let result = adjudicate_chinese_eight_ball_shot(&input).expect("practice shot");
+    assert_eq!(result.foul_code.as_deref(), Some("WRONG_FIRST_CONTACT"));
+    assert_eq!(result.state.active_seat_id.as_deref(), Some(SEAT_TWO));
     assert_eq!(
         result.state.ball_in_hand_zone,
         Some(BallInHandZone::Anywhere)
     );
     assert_eq!(result.state.phase, BilliardsPhase::BallInHand);
-    assert!(
-        result
-            .state
-            .balls
-            .iter()
-            .find(|ball| ball.id == "1")
-            .is_some_and(|ball| ball.pocketed)
-    );
 }
 
 #[test]

@@ -296,41 +296,56 @@ describe("billiards result labels", () => {
 });
 
 describe("billiards solo practice labels", () => {
-  it("keeps practice language free of foul and opponent terminology", () => {
-    const seatId = seatIdSchema.parse("seat-1");
+  it("shows competitive foul notices and identifies the active controlled position", () => {
+    const firstSeat = seatIdSchema.parse("seat-1");
+    const secondSeat = seatIdSchema.parse("seat-2");
     const view = viewFixture({
+      activeSeatId: secondSeat,
       lastShot: {
         foulCode: "NO_BALL_CONTACT",
         points: 0,
-        pottedBallIds: ["cue", "1"],
-        seatId,
+        pottedBallIds: [],
+        seatId: firstSeat,
       },
-      players: [{ active: true, group: "open", score: 1, seatId }],
+      players: [
+        { active: false, group: "solids", score: 1, seatId: firstSeat },
+        { active: true, group: "stripes", score: 0, seatId: secondSeat },
+      ],
       practice: true,
     });
 
-    expect(phaseLabel(view)).toBe("练习击球");
-    expect(noticeLabel(view)).toBe("本杆进球 1 颗 · 继续击球");
-    expect(noticeLabel(view)).not.toContain("犯规");
+    expect(phaseLabel(view)).toBe("轮到位置 2");
+    expect(noticeLabel(view)).toBe("犯规：未碰到球");
   });
 
-  it("does not count a cue-only scratch as a potted practice ball", () => {
-    const seatId = seatIdSchema.parse("seat-1");
+  it("lets the sole player act on a decision assigned to either position", () => {
+    const secondSeat = seatIdSchema.parse("seat-2");
+    const decision = {
+      chooserSeatId: secondSeat,
+      groups: ["solids", "stripes"],
+      type: "choose-group",
+    } as const;
     const view = viewFixture({
-      lastShot: {
-        foulCode: "CUE_BALL_POTTED",
-        points: 0,
-        pottedBallIds: ["cue"],
-        seatId,
+      activeSeatId: secondSeat,
+      legalActions: {
+        canChooseDecidingBlack: false,
+        canChooseGroup: true,
+        canPlaceCue: false,
+        canResign: true,
+        canResolveBreak: false,
+        canShoot: false,
       },
-      players: [{ active: true, group: null, score: 0, seatId }],
+      pendingDecision: decision,
+      phase: "decision",
       practice: true,
     });
 
-    expect(noticeLabel(view)).toBe("继续击球");
+    expect(canActOnDecision(view, decision, false)).toBe(true);
+    expect(phaseLabel(view)).toBe("选择球组");
+    expect(noticeLabel(view)).toBe("待选择：全色或花色");
   });
 
-  it("prompts the player to place a scratched cue ball and continue", () => {
+  it("uses the online in-hand labels after a scratch", () => {
     const view = viewFixture({
       ballInHandZone: "anywhere",
       phase: "ball_in_hand",
@@ -339,7 +354,7 @@ describe("billiards solo practice labels", () => {
     });
 
     expect(phaseLabel(view)).toBe("摆放母球");
-    expect(noticeLabel(view)).toBe("母球落袋，请摆放母球继续");
+    expect(noticeLabel(view)).toBe("母球：自由球");
   });
 });
 

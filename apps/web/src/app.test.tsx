@@ -78,14 +78,23 @@ describe("web routes", () => {
     expect(screen.getByLabelText("房间密码（可选）")).toBeDisabled();
     expect(screen.queryByText("AI 难度")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: /斯诺克/ }));
-    expect(screen.queryByText("台面物理")).not.toBeInTheDocument();
+    const slidingFriction = screen.getByRole("slider", { name: "滑动摩擦" });
+    const rollingFriction = screen.getByRole("slider", { name: "滚动摩擦" });
+    expect(slidingFriction).toBeEnabled();
+    expect(rollingFriction).toBeEnabled();
+    fireEvent.change(slidingFriction, { target: { value: "0.12" } });
+    fireEvent.change(rollingFriction, { target: { value: "0.015" } });
     fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
 
     await waitFor(() => expect(createRoomBody).toBeDefined());
     expect(createRoomBody).toMatchObject({
       gameId: "billiards",
       practice: true,
-      settings: { mode: "snooker" },
+      settings: {
+        clothRollingFriction: 0.015,
+        clothSlidingFriction: 0.12,
+        mode: "snooker",
+      },
     });
     expect(createRoomBody).not.toHaveProperty("botProfileId");
   });

@@ -528,10 +528,6 @@
   padding-top: 11px;
 }
 
-.billiards-action-row.is-practice {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .billiards-action-row .ui-button {
   min-width: 0;
   padding-left: 10px;

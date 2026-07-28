@@ -24,7 +24,7 @@ describe("billiards solo practice view", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows one practice player without resigning or snooker nomination", () => {
+  it("shows two player positions controlled by one practice player", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     const rendered = render(
       <BilliardsGameView
@@ -38,10 +38,12 @@ describe("billiards solo practice view", () => {
     );
 
     expect(screen.getByText(/斯诺克 · 单人练习/)).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "练习统计" })).toBeInTheDocument();
-    expect(rendered.container.querySelectorAll(".billiards-player")).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "练习位置比分" })).toBeInTheDocument();
+    expect(rendered.container.querySelectorAll(".billiards-player")).toHaveLength(2);
+    expect(screen.getByText("位置 1")).toBeInTheDocument();
+    expect(screen.getByText("位置 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出杆" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "认输" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "认输" })).toBeEnabled();
     expect(screen.queryByText("目标彩球")).not.toBeInTheDocument();
   });
 

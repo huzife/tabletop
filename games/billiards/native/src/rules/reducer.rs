@@ -5,7 +5,6 @@ use super::eight_ball::{
 };
 use super::error::{RuleError, RuleResult};
 use super::placement::{check_cue_placement, place_cue_ball};
-use super::practice::adjudicate_practice_shot;
 use super::snooker::{adjudicate_snooker_shot, resolve_snooker_deciding_black_choice};
 use super::types::{
     AdjudicatedBilliardsShot, BilliardsAction, BilliardsBallKind, BilliardsEndReason,
@@ -71,12 +70,6 @@ pub fn reduce_billiards_action(
     }
 
     if matches!(action, BilliardsAction::Resign) {
-        if state.practice {
-            return Err(RuleError::rule(
-                "RESIGN_NOT_AVAILABLE_IN_PRACTICE",
-                "Resignation is unavailable in practice",
-            ));
-        }
         if !state.seat_ids.iter().any(|seat| seat == actor_seat_id) {
             return Err(RuleError::rule(
                 "PLAYER_ONLY",
@@ -145,8 +138,7 @@ pub fn reduce_billiards_action(
                     "The cue ball must be placed before shooting",
                 ));
             }
-            if !state.practice
-                && state.settings.mode == BilliardsMode::Snooker
+            if state.settings.mode == BilliardsMode::Snooker
                 && state.snooker_on == Some(SnookerOn::Color)
                 && shot.nominated_color.is_none()
             {
@@ -167,14 +159,10 @@ pub fn reduce_billiards_action(
                 simulation: simulation.clone(),
                 state: state.clone(),
             };
-            if state.practice {
-                adjudicate_practice_shot(&input)
-            } else {
-                match state.settings.mode {
-                    BilliardsMode::ChineseEightBall => adjudicate_chinese_eight_ball_shot(&input),
-                    BilliardsMode::Snooker => {
-                        adjudicate_snooker_shot(&input, context.deciding_black_chooser_index)
-                    }
+            match state.settings.mode {
+                BilliardsMode::ChineseEightBall => adjudicate_chinese_eight_ball_shot(&input),
+                BilliardsMode::Snooker => {
+                    adjudicate_snooker_shot(&input, context.deciding_black_chooser_index)
                 }
             }
         }

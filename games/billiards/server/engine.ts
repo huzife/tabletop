@@ -43,7 +43,8 @@ export function createBilliardsMatch(
 }
 
 export function getBilliardsActiveSeatIds(state: Readonly<BilliardsMatchState>): readonly SeatId[] {
-  return state.phase === "ended" || state.activeSeatId === null ? [] : [state.activeSeatId];
+  if (state.phase === "ended" || state.activeSeatId === null) return [];
+  return state.practice ? state.seatIds.slice(0, 1) : [state.activeSeatId];
 }
 
 export function getBilliardsDeadlines(): readonly [] {
@@ -62,6 +63,12 @@ function requireCurrentHuman(
   state: Readonly<BilliardsMatchState>,
 ): SeatId {
   if (context.actor.kind !== "human") throw new GameRuleError("PLAYER_ONLY");
+  if (state.practice) {
+    if (context.actor.seatId !== state.seatIds[0] || state.activeSeatId === null) {
+      throw new GameRuleError("NOT_YOUR_TURN");
+    }
+    return state.activeSeatId;
+  }
   if (!state.activeSeatId || context.actor.seatId !== state.activeSeatId) {
     throw new GameRuleError("NOT_YOUR_TURN");
   }
@@ -145,7 +152,6 @@ function transitionForShot(
   const cue = state.balls.find((ball) => ball.kind === "cue");
   if (!cue || cue.pocketed) throw new GameRuleError("PLACE_CUE_FIRST");
   if (
-    !state.practice &&
     state.settings.mode === "snooker" &&
     state.snookerOn === "color" &&
     action.shot.nominatedColor === null
@@ -221,6 +227,10 @@ export function handleBilliardsAction(
 ) {
   if (state.phase === "ended" || state.outcome !== null) throw new GameRuleError("MATCH_ENDED");
   if (action.type === "billiards.resign") {
+    if (state.practice) {
+      const actorSeatId = requireCurrentHuman(context, state);
+      return transitionForRuleAction(state, actorSeatId, action);
+    }
     if (context.actor.kind !== "human" || !state.seatIds.includes(context.actor.seatId)) {
       throw new GameRuleError("PLAYER_ONLY");
     }
@@ -299,7 +309,10 @@ export function projectBilliardsView(
   const table = getBilliardsTableSpec(state.settings.mode);
   const viewerSeatId = viewer.kind === "player" ? viewer.seatId : null;
   const viewerIsPlayer = viewer.kind === "player" && state.seatIds.includes(viewer.seatId);
-  const viewerIsCurrent = viewer.kind === "player" && viewer.seatId === state.activeSeatId;
+  const viewerIsCurrent =
+    viewer.kind === "player" &&
+    (viewer.seatId === state.activeSeatId ||
+      (state.practice && viewer.seatId === state.seatIds[0]));
   return {
     activeSeatId: state.activeSeatId,
     ballInHandZone: state.ballInHandZone,
@@ -315,7 +328,7 @@ export function projectBilliardsView(
         state.phase === "decision" &&
         state.pendingDecision?.type === "choose-group",
       canPlaceCue: viewerIsCurrent && state.phase === "ball_in_hand",
-      canResign: !state.practice && viewerIsPlayer && state.phase !== "ended",
+      canResign: viewerIsPlayer && state.phase !== "ended",
       canResolveBreak:
         viewerIsCurrent &&
         state.phase === "decision" &&

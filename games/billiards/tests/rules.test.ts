@@ -17,6 +17,7 @@ import {
 } from "../physics/index.js";
 import {
   createBilliardsMatch,
+  getBilliardsActiveSeatIds,
   handleBilliardsAction,
   handleBilliardsSystemEvent,
   projectBilliardsView,
@@ -70,10 +71,6 @@ function adjudicateSnookerShot(
   chooserIndex = 1,
 ): AdjudicatedBilliardsShot {
   return reduceShot(input, chooserIndex);
-}
-
-function adjudicatePracticeShot(input: Readonly<ShotAdjudicationInput>): AdjudicatedBilliardsShot {
-  return reduceShot(input);
 }
 
 function settings(mode: BilliardsMode): BilliardsSettings {
@@ -224,7 +221,11 @@ describe("standard billiards setups", () => {
     expect(
       billiardsSettings.schema.safeParse({ mode: "snooker", spinConvergence: 1 }).success,
     ).toBe(false);
-    expect(billiardsSettings.summarize(parsed)).toEqual([{ label: "模式", value: "斯诺克" }]);
+    expect(billiardsSettings.summarize(parsed)).toEqual([
+      { label: "模式", value: "斯诺克" },
+      { label: "滑动摩擦", value: "0.080" },
+      { label: "滚动摩擦", value: "0.010" },
+    ]);
     expect(
       billiardsSettings.schema.safeParse({
         clothRollingFriction: 0.002,
@@ -1110,7 +1111,7 @@ describe("snooker rules", () => {
 });
 
 describe("single-player practice", () => {
-  it("accepts one human plus one empty lobby seat and creates a one-seat practice state", () => {
+  it("accepts one human plus one empty lobby seat and creates two competitive positions", () => {
     const definitions = billiardsServerModule.lobby?.getSeatDefinitions({
       ...settings("chinese-eight-ball"),
     });
@@ -1164,9 +1165,12 @@ describe("single-player practice", () => {
       activeSeatId: seat1,
       ballInHandZone: "behind-line",
       phase: "ball_in_hand",
-      players: [{ group: null, score: 0, seatId: seat1 }],
+      players: [
+        { group: "open", score: 0, seatId: seat1 },
+        { group: "open", score: 0, seatId: seat2 },
+      ],
       practice: true,
-      seatIds: [seat1],
+      seatIds: [seat1, seat2],
       snookerOn: null,
     });
 
@@ -1175,135 +1179,145 @@ describe("single-player practice", () => {
       settings("chinese-eight-ball"),
     );
     expect(versus).toMatchObject({ practice: false, seatIds: [seat1, seat2] });
+    expect(practiceState("snooker")).toMatchObject({
+      players: [
+        { group: null, score: 0, seatId: seat1 },
+        { group: null, score: 0, seatId: seat2 },
+      ],
+      snookerOn: "red",
+    });
   });
 
-  it("keeps every shot with the same player and ignores competitive foul conditions", () => {
-    const initial = readyToShoot(practiceState("chinese-eight-ball"));
-    const result = adjudicatePracticeShot({
-      actorSeatId: seat1,
-      shot: { ...shot(), tip: { x: 0, y: -0.5 } },
-      simulation: simulation(initial, {
-        first: null,
-        jumped: ["1"],
-        potted: ["8"],
-        postContactRails: [],
-      }),
-      state: initial,
-    });
-
-    expect(result).toMatchObject({
-      foulCode: null,
-      points: 0,
-      state: {
-        activeSeatId: seat1,
-        ballInHandZone: null,
-        lastShot: { foulCode: null, points: 0, pottedBallIds: ["8"], seatId: seat1 },
-        outcome: null,
-        pendingDecision: null,
-        phase: "aiming",
-        players: [{ group: null, score: 0, seatId: seat1 }],
-        shotNumber: 1,
-      },
-    });
-    expect(result.state.balls.find(({ kind }) => kind === "eight")?.pocketed).toBe(true);
-  });
-
-  it("keeps object balls down and grants an anywhere cue ball after a scratch", () => {
-    const initial = readyToShoot(practiceState("chinese-eight-ball"));
-    const result = adjudicatePracticeShot({
+  it("uses the same Chinese eight-ball foul, turn and terminal rules as online play", () => {
+    const practice = withEightBallGroups(practiceState("chinese-eight-ball"));
+    const foul = adjudicateChineseEightBallShot({
       actorSeatId: seat1,
       shot: shot(),
-      simulation: simulation(initial, { first: "1", potted: ["1", "cue"] }),
-      state: initial,
+      simulation: simulation(practice, { first: "9", postContactRails: ["9"] }),
+      state: practice,
     });
-
-    expect(result).toMatchObject({
-      foulCode: null,
-      points: 0,
+    expect(foul).toMatchObject({
+      foulCode: "WRONG_FIRST_CONTACT",
       state: {
-        activeSeatId: seat1,
+        activeSeatId: seat2,
         ballInHandZone: "anywhere",
         phase: "ball_in_hand",
-        players: [{ score: 0 }],
       },
     });
-    expect(result.state.balls.find(({ id }) => id === "1")?.pocketed).toBe(true);
-    expect(result.state.balls.find(({ kind }) => kind === "cue")?.pocketed).toBe(true);
+
+    const cleared = withEightBallGroups(practiceState("chinese-eight-ball"), {
+      clearSolids: true,
+    });
+    const won = adjudicateChineseEightBallShot({
+      actorSeatId: seat1,
+      shot: shot(),
+      simulation: simulation(cleared, { first: "8", potted: ["8"] }),
+      state: cleared,
+    });
+    expect(won.state).toMatchObject({
+      outcome: { reason: "eight-ball", winnerSeatId: seat1 },
+      phase: "ended",
+      practice: true,
+    });
   });
 
-  it("does not respot snooker colors or rerack a cleared practice table", () => {
-    const snooker = readyToShoot(practiceState("snooker"));
-    const black = adjudicatePracticeShot({
+  it("uses the same snooker scoring, nomination and final-black rules as online play", () => {
+    const practice = readyToShoot(practiceState("snooker"));
+    const red = adjudicateSnookerShot({
       actorSeatId: seat1,
       shot: shot(),
-      simulation: simulation(snooker, { first: "black", potted: ["black"] }),
-      state: snooker,
+      simulation: simulation(practice, { first: "red-1", potted: ["red-1"] }),
+      state: practice,
     });
-    expect(black.state).toMatchObject({ activeSeatId: seat1, outcome: null, snookerOn: null });
-    expect(black.state.balls.find(({ kind }) => kind === "black")?.pocketed).toBe(true);
+    expect(red).toMatchObject({
+      points: 1,
+      state: { activeSeatId: seat1, snookerOn: "color" },
+    });
 
-    const eightBall = readyToShoot(practiceState("chinese-eight-ball"));
-    const objectIds = eightBall.balls.filter(({ kind }) => kind !== "cue").map(({ id }) => id);
-    const cleared = adjudicatePracticeShot({
-      actorSeatId: seat1,
-      shot: shot(),
-      simulation: simulation(eightBall, { first: "1", potted: objectIds }),
-      state: eightBall,
-    });
-    expect(cleared.state).toMatchObject({
-      activeSeatId: seat1,
+    const scored = withSnookerScores(practice, 44, 50);
+    const finalBlack: BilliardsMatchState = {
+      ...scored,
+      balls: scored.balls.map((ball) =>
+        ball.kind === "red" ||
+        ball.kind === "yellow" ||
+        ball.kind === "green" ||
+        ball.kind === "brown" ||
+        ball.kind === "blue" ||
+        ball.kind === "pink"
+          ? { ...ball, pocketed: true }
+          : ball,
+      ),
       breakShot: false,
-      outcome: null,
-      phase: "aiming",
-      shotNumber: 1,
+      snookerOn: "black",
+    };
+    const won = adjudicateSnookerShot({
+      actorSeatId: seat1,
+      shot: shot(),
+      simulation: simulation(finalBlack, { first: "black", potted: ["black"] }),
+      state: finalBlack,
     });
-    expect(
-      cleared.state.balls.filter(({ kind }) => kind !== "cue").every(({ pocketed }) => pocketed),
-    ).toBe(true);
+    expect(won.state).toMatchObject({
+      outcome: { reason: "final-black", winnerSeatId: seat1 },
+      phase: "ended",
+      practice: true,
+    });
   });
 
-  it("bypasses snooker nomination, disables resignation, and projects a valid solo view", () => {
-    const initial: BilliardsMatchState = {
-      ...readyToShoot(practiceState("snooker")),
-      snookerOn: "color",
+  it("maps the sole human to whichever position is active, including decisions and resignation", () => {
+    const initial = practiceState("chinese-eight-ball");
+    const secondPosition: BilliardsMatchState = {
+      ...initial,
+      activeSeatId: seat2,
+      ballInHandZone: "anywhere",
     };
-    const transition = handleBilliardsAction(
+    const cue = secondPosition.balls.find(({ kind }) => kind === "cue");
+    if (!cue) throw new Error("practice state is missing its cue ball");
+    const placed = handleBilliardsAction(
       createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
-      initial,
-      { type: "billiards.shoot", shot: shot(null) },
+      secondPosition,
+      { type: "billiards.place-cue", x: cue.x, y: cue.y },
     );
-    expect(transition).toMatchObject({
-      kind: "applied",
-      state: { activeSeatId: seat1, outcome: null, practice: true },
-    });
-    expect(transition.events[0]).toMatchObject({
-      foulCode: null,
-      nextSeatId: seat1,
-      points: 0,
-      seatId: seat1,
-      type: "billiards.shot",
-    });
+    expect(placed.state).toMatchObject({ activeSeatId: seat2, phase: "aiming" });
+    expect(getBilliardsActiveSeatIds(placed.state)).toEqual([seat1]);
 
-    expectRuleCode(
-      () =>
-        handleBilliardsAction(
-          createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
-          initial,
-          { type: "billiards.resign" },
-        ),
-      "RESIGN_NOT_AVAILABLE_IN_PRACTICE",
-    );
-    const view = projectBilliardsView(createTestProjectionContextV1(), initial, {
+    const view = projectBilliardsView(createTestProjectionContextV1(), placed.state, {
       kind: "player",
       seatId: seat1,
     });
     expect(view).toMatchObject({
-      legalActions: { canResign: false, canShoot: true },
-      players: [{ active: true, group: null, score: 0, seatId: seat1 }],
+      legalActions: { canResign: true, canShoot: true },
+      players: [
+        { active: false, group: "open", score: 0, seatId: seat1 },
+        { active: true, group: "open", score: 0, seatId: seat2 },
+      ],
       practice: true,
       viewerSeatId: seat1,
     });
     expect(() => billiardsViewSchema.parse(view)).not.toThrow();
+
+    const nominationRequired: BilliardsMatchState = {
+      ...readyToShoot(practiceState("snooker")),
+      snookerOn: "color",
+    };
+    expectRuleCode(
+      () =>
+        handleBilliardsAction(
+          createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
+          nominationRequired,
+          { type: "billiards.shoot", shot: shot(null) },
+        ),
+      "COLOR_NOMINATION_REQUIRED",
+    );
+
+    const resigned = handleBilliardsAction(
+      createTestActionContextV1({ actor: { kind: "human", seatId: seat1 } }),
+      placed.state,
+      { type: "billiards.resign" },
+    );
+    expect(resigned.state).toMatchObject({
+      outcome: { reason: "resigned", winnerSeatId: seat1 },
+      phase: "ended",
+    });
   });
 
   it("lets a solo leave close the room and releases a stale seat after disconnect grace", () => {

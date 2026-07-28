@@ -175,7 +175,7 @@ pub fn create_initial_balls(mode: BilliardsMode) -> RuleResult<Vec<BilliardsBall
 
 pub fn create_initial_billiards_state(
     settings: BilliardsSettings,
-    seat_ids: Vec<SeatId>,
+    mut seat_ids: Vec<SeatId>,
 ) -> RuleResult<BilliardsMatchState> {
     if seat_ids.is_empty()
         || seat_ids.len() > 2
@@ -189,7 +189,15 @@ pub fn create_initial_billiards_state(
     }
 
     let practice = seat_ids.len() == 1;
-    let initial_group = if !practice && settings.mode == BilliardsMode::ChineseEightBall {
+    if practice {
+        let second_seat_id = if seat_ids[0] == "seat-2" {
+            "seat-1"
+        } else {
+            "seat-2"
+        };
+        seat_ids.push(second_seat_id.to_owned());
+    }
+    let initial_group = if settings.mode == BilliardsMode::ChineseEightBall {
         Some(EightBallGroup::Open)
     } else {
         None
@@ -227,7 +235,7 @@ pub fn create_initial_billiards_state(
         seat_ids,
         settings: settings.clone(),
         shot_number: 0,
-        snooker_on: if !practice && settings.mode == BilliardsMode::Snooker {
+        snooker_on: if settings.mode == BilliardsMode::Snooker {
             Some(SnookerOn::Red)
         } else {
             None
@@ -239,8 +247,7 @@ pub fn rerack_chinese_eight_ball(
     state: &BilliardsMatchState,
     breaker_seat_id: &str,
 ) -> RuleResult<BilliardsMatchState> {
-    if state.practice
-        || state.settings.mode != BilliardsMode::ChineseEightBall
+    if state.settings.mode != BilliardsMode::ChineseEightBall
         || !state.seat_ids.iter().any(|seat| seat == breaker_seat_id)
     {
         return Err(RuleError::rule(

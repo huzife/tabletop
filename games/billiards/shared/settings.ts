@@ -48,12 +48,8 @@ export const billiardsSettings = defineGameSettingsContractV1<BilliardsSettings>
   schema: billiardsSettingsSchema,
   summarize: ({ clothRollingFriction, clothSlidingFriction, mode }) => [
     { label: "模式", value: MODE_LABELS[mode] },
-    ...(mode === "chinese-eight-ball"
-      ? [
-          { label: "滑动摩擦", value: clothSlidingFriction.toFixed(3) },
-          { label: "滚动摩擦", value: clothRollingFriction.toFixed(3) },
-        ]
-      : []),
+    { label: "滑动摩擦", value: clothSlidingFriction.toFixed(3) },
+    { label: "滚动摩擦", value: clothRollingFriction.toFixed(3) },
   ],
 });
 

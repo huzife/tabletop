@@ -240,7 +240,7 @@ export function BilliardsGameView({
 
           <section
             className="billiards-players"
-            aria-label={view.practice ? "练习统计" : "玩家比分"}
+            aria-label={view.practice ? "练习位置比分" : "玩家比分"}
           >
             {view.players.map((player, index) => (
               <div
@@ -256,10 +256,19 @@ export function BilliardsGameView({
                 />
                 <span className="billiards-player__name">
                   <strong>
-                    {player.seatId === view.viewerSeatId ? "你" : `玩家 ${index + 1}`}
+                    {view.practice
+                      ? `位置 ${index + 1}`
+                      : player.seatId === view.viewerSeatId
+                        ? "你"
+                        : `玩家 ${index + 1}`}
                   </strong>
                   <small>
-                    {view.practice ? "连续击球" : playerGroupLabel(view.mode, player.group)}
+                    {view.practice
+                      ? `${view.viewerSeatId === null ? "练习位置" : "由你操控"} · ${playerGroupLabel(
+                          view.mode,
+                          player.group,
+                        )}`
+                      : playerGroupLabel(view.mode, player.group)}
                   </small>
                 </span>
                 <strong className="billiards-player__score">{player.score}</strong>
@@ -308,7 +317,7 @@ export function BilliardsGameView({
                 suffix="°"
                 value={displayedAim.elevation}
               />
-              {!view.practice && view.mode === "snooker" && view.snookerOn === "color" ? (
+              {view.mode === "snooker" && view.snookerOn === "color" ? (
                 <ColorNomination
                   disabled={shotControlsDisabled}
                   onChange={setNominatedColor}
@@ -329,9 +338,7 @@ export function BilliardsGameView({
             />
           )}
 
-          <div
-            className={view.practice ? "billiards-action-row is-practice" : "billiards-action-row"}
-          >
+          <div className="billiards-action-row">
             <Button
               className="billiards-shoot"
               disabled={disabled || !view.legalActions.canShoot}
@@ -345,17 +352,15 @@ export function BilliardsGameView({
               )}
               <span>出杆</span>
             </Button>
-            {!view.practice ? (
-              <Button
-                className="billiards-resign"
-                disabled={disabled || !view.legalActions.canResign}
-                onClick={() => dispatchAction({ type: "billiards.resign" })}
-                variant="danger"
-              >
-                <Flag aria-hidden="true" size={16} />
-                <span>认输</span>
-              </Button>
-            ) : null}
+            <Button
+              className="billiards-resign"
+              disabled={disabled || !view.legalActions.canResign}
+              onClick={() => dispatchAction({ type: "billiards.resign" })}
+              variant="danger"
+            >
+              <Flag aria-hidden="true" size={16} />
+              <span>认输</span>
+            </Button>
           </div>
 
           <div aria-live="polite" className="billiards-notice">
@@ -383,7 +388,8 @@ function DecisionPanel({
   readonly view: BilliardsView;
 }) {
   const enabled = canActOnDecision(view, decision, interactionDisabled);
-  const isChooser = decision.chooserSeatId === view.viewerSeatId;
+  const isChooser =
+    (view.practice && view.viewerSeatId !== null) || decision.chooserSeatId === view.viewerSeatId;
   return (
     <section aria-label="比赛决策" className="billiards-decision">
       <header>
@@ -1295,7 +1301,7 @@ export function canActOnDecision(
   if (
     interactionDisabled ||
     view.phase !== "decision" ||
-    view.viewerSeatId !== decision.chooserSeatId
+    (!view.practice && view.viewerSeatId !== decision.chooserSeatId)
   )
     return false;
   if (decision.type === "break-choice") return view.legalActions.canResolveBreak === true;
@@ -1305,17 +1311,9 @@ export function canActOnDecision(
 
 export function noticeLabel(view: BilliardsView): string {
   if (view.phase === "ball_in_hand") {
-    if (view.practice) {
-      return view.shotNumber > 0 ? "母球落袋，请摆放母球继续" : "摆放母球开始练习";
-    }
     if (view.ballInHandZone === "d") return "母球：D 区";
     if (view.ballInHandZone === "behind-line") return "母球：发球线后";
     return "母球：自由球";
-  }
-  if (view.practice) {
-    if (view.lastShot === null) return "调整击球参数后开始练习";
-    const pottedCount = view.lastShot.pottedBallIds.filter((ballId) => ballId !== "cue").length;
-    return pottedCount > 0 ? `本杆进球 ${pottedCount} 颗 · 继续击球` : "继续击球";
   }
   const decision = view.pendingDecision ?? null;
   if (view.phase === "decision" && decision !== null) {
@@ -1334,24 +1332,35 @@ export function noticeLabel(view: BilliardsView): string {
 export function phaseLabel(view: BilliardsView): string {
   if (view.outcome !== null) return "本局结束";
   if (view.phase === "ball_in_hand") {
-    if (view.practice) return "摆放母球";
     return view.ballInHandZone === "behind-line" ? "发球线后摆球" : "摆放母球";
   }
   if (view.phase === "decision") {
     const decision = view.pendingDecision ?? null;
     if (decision?.type === "break-choice") {
-      return decision.chooserSeatId === view.viewerSeatId ? "选择开球处理" : "等待开球处理";
+      return (view.practice && view.viewerSeatId !== null) ||
+        decision.chooserSeatId === view.viewerSeatId
+        ? "选择开球处理"
+        : "等待开球处理";
     }
     if (decision?.type === "choose-group") {
-      return decision.chooserSeatId === view.viewerSeatId ? "选择球组" : "等待选择球组";
+      return (view.practice && view.viewerSeatId !== null) ||
+        decision.chooserSeatId === view.viewerSeatId
+        ? "选择球组"
+        : "等待选择球组";
     }
     if (decision?.type === "deciding-black-choice") {
-      return decision.chooserSeatId === view.viewerSeatId ? "选择决胜先手" : "等待先手选择";
+      return (view.practice && view.viewerSeatId !== null) ||
+        decision.chooserSeatId === view.viewerSeatId
+        ? "选择决胜先手"
+        : "等待先手选择";
     }
     return "等待裁定";
   }
-  if (view.practice) return "练习击球";
   if (view.activeSeatId === null) return "等待玩家";
+  if (view.practice) {
+    const activeIndex = view.players.findIndex(({ seatId }) => seatId === view.activeSeatId);
+    return activeIndex < 0 ? "等待位置" : `轮到位置 ${activeIndex + 1}`;
+  }
   return view.activeSeatId === view.viewerSeatId ? "轮到你" : "对手回合";
 }
 
@@ -1384,11 +1393,13 @@ export function outcomeLabel(view: BilliardsView): string {
   })();
   const winnerIndex = view.players.findIndex(({ seatId }) => seatId === view.outcome?.winnerSeatId);
   const winner =
-    view.viewerSeatId === view.outcome.winnerSeatId
-      ? "你获胜"
-      : winnerIndex >= 0
-        ? `玩家 ${winnerIndex + 1} 获胜`
-        : "胜负已定";
+    view.practice && winnerIndex >= 0
+      ? `位置 ${winnerIndex + 1} 获胜`
+      : view.viewerSeatId === view.outcome.winnerSeatId
+        ? "你获胜"
+        : winnerIndex >= 0
+          ? `玩家 ${winnerIndex + 1} 获胜`
+          : "胜负已定";
   return `${reason} · ${winner}`;
 }
 
