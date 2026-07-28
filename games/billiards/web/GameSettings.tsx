@@ -3,6 +3,7 @@ import type { GameSettingsPropsV1 } from "@tabletop/game-sdk/web";
 import {
   CLOTH_ROLLING_FRICTION_RANGE,
   CLOTH_SLIDING_FRICTION_RANGE,
+  CUSHION_FRICTION_RANGE,
   type BilliardsMode,
   type BilliardsSettings,
 } from "../shared/settings.js";
@@ -102,6 +103,32 @@ export function BilliardsSettingsEditor({
               value={value.clothRollingFriction}
             />
             <small>越低，球进入自然滚动后滑行得越远。</small>
+          </label>
+        </div>
+      </fieldset>
+      <fieldset className="billiards-settings__group" disabled={disabled}>
+        <legend>库边参数</legend>
+        <div className="billiards-settings__physics">
+          <label className="billiards-settings__parameter">
+            <span>
+              <strong>球–库边摩擦</strong>
+              <output>{value.cushionFriction.toFixed(3)}</output>
+            </span>
+            <input
+              aria-label="库边摩擦"
+              max={CUSHION_FRICTION_RANGE.max}
+              min={CUSHION_FRICTION_RANGE.min}
+              onChange={(event) =>
+                onChange({
+                  ...value,
+                  cushionFriction: event.currentTarget.valueAsNumber,
+                })
+              }
+              step={CUSHION_FRICTION_RANGE.step}
+              type="range"
+              value={value.cushionFriction}
+            />
+            <small>越高，球撞库时切向速度与旋转交换越明显。</small>
           </label>
         </div>
       </fieldset>

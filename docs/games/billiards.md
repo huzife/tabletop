@@ -173,7 +173,7 @@ Rust 击球模型逐式实现 Pooltool 的球杆/球质量、球体惯量、接�
 ### 6.3 球球、球库与多接触
 
 - 球球碰撞使用 Pooltool 的等质量 frictional-inelastic 解、`e_b=0.95` 和 Alciatore 速度相关摩擦；滑动反向时切换到无滑解。
-- 直线库与圆形袋角使用同一个 Stronge compliant 解，`omega_ratio=1.8`、`e_c=0.85`；中式 `f_c=0.2`，斯诺克 `f_c=0.5`。
+- 直线库与圆形袋角使用同一个 Stronge compliant 解，`omega_ratio=1.8`、`e_c=0.85`；球–库边摩擦 `f_c` 来自房间设置。
 - 碰撞前执行 Pooltool 的 `MIN_DIST=1e-6` kiss 修正；近似同速持续接触使用上游的 10% 径向动量转移保护。
 - 多球同时接触沿用上游的顺序单事件解析，不再额外引入联合多接触模型。
 
@@ -218,9 +218,15 @@ Pooltool 的 `Pocket.depth` 不属于桌型 layout 参数；产品创建的六�
 
 ## 8. 参数配置与标定
 
-房间设置只保留 `mode`。原 `tableFriction`、`spinConvergence` 及其 UI、动作输入、展示事件和视图字段已经删除，避免房间参数把固定 Pooltool profile 改写成另一套模型。
+房间设置包含 `mode`、台布滑动摩擦 `clothSlidingFriction`、台布滚动摩擦 `clothRollingFriction` 和球–库边摩擦 `cushionFriction`。原 `tableFriction`、`spinConvergence` 及其 UI、动作输入、展示事件和视图字段已经删除。
 
-球、球杆、台呢、恢复、袋口/袋角几何、事件 epsilon 与 resolver 选择都是随 WASM 发布的固定 profile 常量，不从开发机配置或未受控文件读取。中式八球使用 `u_s=0.2`、`u_r=0.01`；斯诺克使用 `u_s=0.5`、`u_r=0.01`；两者 `u_sp=(4/9)R`、`g=9.81`。
+两种模式共用同一套事件驱动物理引擎和摩擦参数机制；模式只选择球的质量、半径、球杆参数与球桌几何。三项摩擦都由房间设置传入服务端权威模拟、浏览器回放和轨迹预测：
+
+- `clothSlidingFriction`：默认 `0.08`，范围 `0.04–0.5`，上限覆盖斯诺克原固定值；
+- `clothRollingFriction`：默认 `0.01`，范围 `0.003–0.02`；
+- `cushionFriction`：默认 `0.08`，范围 `0.04–0.5`，覆盖两种模式原固定值。
+
+其余球、球杆、恢复、袋口/袋角几何、事件 epsilon 与 resolver 选择仍是随 WASM 发布的固定 profile 常量，不从开发机配置或未受控文件读取。两种模式均使用 `u_sp=(4/9)R`、`g=9.81`。
 
 当前产品已具备参数入口、固定基线和回归测试，但没有自动拟合工具或已认证的实台测量数据集。后续标定应遵循：
 
@@ -255,7 +261,7 @@ fixture 或标定工具尚未落库时，文档示例只能使用类似 `<calibr
 - 8 位 `checksum`：兼容现有 `billiards.shot` 展示事件；
 - 32 个十六进制字符的 `stateHash`：覆盖量化后的最终球位、时长、有序物理事件和进袋顺序。
 
-`stateHash` 是单杆物理结果的快速确定性指纹，不包含完整规则状态，也不是密码学签名，不能单独作为反作弊证据。新展示事件同时携带 `physicsVersion` 与 `stateHash`；解析旧事件时这两个字段默认空值，并尝试兼容 checksum 校验。原 p2 事件通常不会与新 Rust 结果得到相同 checksum，此时客户端安全跳过动画并直接显示权威快照，不承诺跨物理引擎播放旧轨迹。完整物理事件仍只用于模拟结果、测试和诊断，尚未形成持久化的整场事件日志。跨物理版本重放必须保存对应版本与输入，不能假设新 WASM 会复现旧版本结果。
+`stateHash` 是单杆物理结果的快速确定性指纹，不包含完整规则状态，也不是密码学签名，不能单独作为反作弊证据。新展示事件同时携带三项摩擦参数、`physicsVersion` 与 `stateHash`；解析旧事件时摩擦参数取当前默认值，版本和哈希默认空值，并尝试兼容 checksum 校验。原 p2 事件通常不会与新 Rust 结果得到相同 checksum，此时客户端安全跳过动画并直接显示权威快照，不承诺跨物理引擎播放旧轨迹。完整物理事件仍只用于模拟结果、测试和诊断，尚未形成持久化的整场事件日志。跨物理版本重放必须保存对应版本与输入，不能假设新 WASM 会复现旧版本结果。
 
 ## 10. AI 轨迹预测 API
 
@@ -264,6 +270,9 @@ Node 入口同步导出 `predictBilliardsTrajectory`，浏览器入口导出同�
 ```ts
 {
   balls,
+  clothRollingFriction?,
+  clothSlidingFriction?,
+  cushionFriction?,
   mode,
   shot,
   maxFrames?

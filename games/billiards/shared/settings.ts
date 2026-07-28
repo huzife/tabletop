@@ -6,8 +6,9 @@ export type BilliardsMode = z.infer<typeof billiardsModeSchema>;
 
 export const DEFAULT_CLOTH_SLIDING_FRICTION = 0.08;
 export const DEFAULT_CLOTH_ROLLING_FRICTION = 0.01;
+export const DEFAULT_CUSHION_FRICTION = 0.08;
 export const CLOTH_SLIDING_FRICTION_RANGE = {
-  max: 0.2,
+  max: 0.5,
   min: 0.04,
   step: 0.01,
 } as const;
@@ -15,6 +16,11 @@ export const CLOTH_ROLLING_FRICTION_RANGE = {
   max: 0.02,
   min: 0.003,
   step: 0.001,
+} as const;
+export const CUSHION_FRICTION_RANGE = {
+  max: 0.5,
+  min: 0.04,
+  step: 0.01,
 } as const;
 
 export const billiardsSettingsSchema = z.strictObject({
@@ -30,6 +36,12 @@ export const billiardsSettingsSchema = z.strictObject({
     .min(CLOTH_SLIDING_FRICTION_RANGE.min)
     .max(CLOTH_SLIDING_FRICTION_RANGE.max)
     .default(DEFAULT_CLOTH_SLIDING_FRICTION),
+  cushionFriction: z
+    .number()
+    .finite()
+    .min(CUSHION_FRICTION_RANGE.min)
+    .max(CUSHION_FRICTION_RANGE.max)
+    .default(DEFAULT_CUSHION_FRICTION),
   mode: billiardsModeSchema,
 });
 export type BilliardsSettings = z.infer<typeof billiardsSettingsSchema>;
@@ -43,13 +55,15 @@ export const billiardsSettings = defineGameSettingsContractV1<BilliardsSettings>
   defaultValue: {
     clothRollingFriction: DEFAULT_CLOTH_ROLLING_FRICTION,
     clothSlidingFriction: DEFAULT_CLOTH_SLIDING_FRICTION,
+    cushionFriction: DEFAULT_CUSHION_FRICTION,
     mode: "chinese-eight-ball",
   },
   schema: billiardsSettingsSchema,
-  summarize: ({ clothRollingFriction, clothSlidingFriction, mode }) => [
+  summarize: ({ clothRollingFriction, clothSlidingFriction, cushionFriction, mode }) => [
     { label: "模式", value: MODE_LABELS[mode] },
     { label: "滑动摩擦", value: clothSlidingFriction.toFixed(3) },
     { label: "滚动摩擦", value: clothRollingFriction.toFixed(3) },
+    { label: "库边摩擦", value: cushionFriction.toFixed(3) },
   ],
 });
 

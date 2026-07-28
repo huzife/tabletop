@@ -12,8 +12,10 @@ import {
   billiardsModeSchema,
   CLOTH_ROLLING_FRICTION_RANGE,
   CLOTH_SLIDING_FRICTION_RANGE,
+  CUSHION_FRICTION_RANGE,
   DEFAULT_CLOTH_ROLLING_FRICTION,
   DEFAULT_CLOTH_SLIDING_FRICTION,
+  DEFAULT_CUSHION_FRICTION,
 } from "./settings.js";
 
 export const billiardsBallKindSchema = z.enum([
@@ -224,6 +226,12 @@ const shotDisplayEventSchema = z.strictObject({
     .min(CLOTH_SLIDING_FRICTION_RANGE.min)
     .max(CLOTH_SLIDING_FRICTION_RANGE.max)
     .default(DEFAULT_CLOTH_SLIDING_FRICTION),
+  cushionFriction: z
+    .number()
+    .finite()
+    .min(CUSHION_FRICTION_RANGE.min)
+    .max(CUSHION_FRICTION_RANGE.max)
+    .default(DEFAULT_CUSHION_FRICTION),
   durationMs: z.number().int().nonnegative().max(300_000),
   foulCode: z.string().min(1).max(64).nullable(),
   initialBalls: z.array(billiardsBallSchema).min(16).max(22),

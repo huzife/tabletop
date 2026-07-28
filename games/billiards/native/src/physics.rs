@@ -3,11 +3,12 @@ use crate::geometry::{Aabb, CircularCushion, CushionDirection, LinearCushion, Ta
 use crate::math::{EPSILON, Vec2, Vec3, clamp, normalize_rotation, quantize, roots_in_interval};
 use crate::model::{
     Ball, BallKind, BallParameters, BilliardsMode, CueStrikeDiagnostics,
-    DEFAULT_CLOTH_ROLLING_FRICTION, DEFAULT_CLOTH_SLIDING_FRICTION, DynamicBall,
-    MAX_CLOTH_ROLLING_FRICTION, MAX_CLOTH_SLIDING_FRICTION, MIN_CLOTH_ROLLING_FRICTION,
-    MIN_CLOTH_SLIDING_FRICTION, MotionState, PHYSICS_VERSION, PredictShotInput, PredictedBallPath,
-    PredictedPathPoint, Shot, ShotSimulationResult, SimulateShotInput, SimulationBallFrame,
-    SimulationEvent, SimulationFrame, TableSpec, TrajectoryPrediction,
+    DEFAULT_CLOTH_ROLLING_FRICTION, DEFAULT_CLOTH_SLIDING_FRICTION, DEFAULT_CUSHION_FRICTION,
+    DynamicBall, MAX_CLOTH_ROLLING_FRICTION, MAX_CLOTH_SLIDING_FRICTION, MAX_CUSHION_FRICTION,
+    MIN_CLOTH_ROLLING_FRICTION, MIN_CLOTH_SLIDING_FRICTION, MIN_CUSHION_FRICTION, MotionState,
+    PHYSICS_VERSION, PredictShotInput, PredictedBallPath, PredictedPathPoint, Shot,
+    ShotSimulationResult, SimulateShotInput, SimulationBallFrame, SimulationEvent, SimulationFrame,
+    TableSpec, TrajectoryPrediction,
 };
 use crate::replay::{legacy_checksum, state_hash};
 use crate::stronge;
@@ -52,33 +53,29 @@ impl CueParameters {
 }
 
 pub fn ball_parameters(mode: BilliardsMode) -> BallParameters {
-    ball_parameters_with_cloth(
+    ball_parameters_with_friction(
         mode,
         DEFAULT_CLOTH_SLIDING_FRICTION,
         DEFAULT_CLOTH_ROLLING_FRICTION,
+        DEFAULT_CUSHION_FRICTION,
     )
 }
 
-fn ball_parameters_with_cloth(
+fn ball_parameters_with_friction(
     mode: BilliardsMode,
     cloth_sliding_friction: f64,
     cloth_rolling_friction: f64,
+    cushion_friction: f64,
 ) -> BallParameters {
-    let (mass, radius, sliding_friction, rolling_friction, cushion_friction) = match mode {
-        BilliardsMode::ChineseEightBall => (
-            0.170_097,
-            0.028_575 * 1.4,
-            cloth_sliding_friction,
-            cloth_rolling_friction,
-            0.2,
-        ),
-        BilliardsMode::Snooker => (0.140, 0.026_193_75, 0.5, 0.01, 0.5),
+    let (mass, radius) = match mode {
+        BilliardsMode::ChineseEightBall => (0.170_097, 0.028_575 * 1.4),
+        BilliardsMode::Snooker => (0.140, 0.026_193_75),
     };
     BallParameters {
         mass,
         radius,
-        sliding_friction,
-        rolling_friction,
+        sliding_friction: cloth_sliding_friction,
+        rolling_friction: cloth_rolling_friction,
         spinning_friction: (4.0 / 9.0) * radius,
         ball_restitution: 0.95,
         table_restitution: 0.5,
@@ -180,10 +177,11 @@ impl CandidateEvent {
 pub fn simulate_shot(input: SimulateShotInput) -> Result<ShotSimulationResult, CoreError> {
     validate_input(&input)?;
     let geometry = TableGeometry::for_mode(input.mode);
-    let parameters = ball_parameters_with_cloth(
+    let parameters = ball_parameters_with_friction(
         input.mode,
         input.cloth_sliding_friction,
         input.cloth_rolling_friction,
+        input.cushion_friction,
     );
     let (mut balls, indices_by_id) = dynamic_balls(&input.balls, &geometry.table, parameters);
     let cue_index = balls
@@ -345,6 +343,7 @@ pub fn predict_shot(input: PredictShotInput) -> Result<TrajectoryPrediction, Cor
         capture_frames: true,
         cloth_rolling_friction: input.cloth_rolling_friction,
         cloth_sliding_friction: input.cloth_sliding_friction,
+        cushion_friction: input.cushion_friction,
         mode: input.mode,
         shot: input.shot,
     })?;
@@ -429,6 +428,14 @@ fn validate_input(input: &SimulateShotInput) -> Result<(), CoreError> {
         return Err(CoreError::invalid(
             "CLOTH_FRICTION_OUT_OF_RANGE",
             "cloth friction is outside the supported calibration range",
+        ));
+    }
+    if !input.cushion_friction.is_finite()
+        || !(MIN_CUSHION_FRICTION..=MAX_CUSHION_FRICTION).contains(&input.cushion_friction)
+    {
+        return Err(CoreError::invalid(
+            "CUSHION_FRICTION_OUT_OF_RANGE",
+            "cushion friction is outside the supported calibration range",
         ));
     }
     let shot = &input.shot;
@@ -1775,7 +1782,7 @@ mod tests {
     }
 
     #[test]
-    fn pooltool_parameter_sets_are_exact() {
+    fn mode_parameters_share_passed_friction_values() {
         let pool = ball_parameters(BilliardsMode::ChineseEightBall);
         assert_eq!(pool.mass, 0.170_097);
         assert_eq!(pool.radius, 0.028_575 * 1.4);
@@ -1785,19 +1792,26 @@ mod tests {
         assert_eq!(pool.ball_restitution, 0.95);
         assert_eq!(pool.table_restitution, 0.5);
         assert_eq!(pool.cushion_restitution, 0.85);
-        assert_eq!(pool.cushion_friction, 0.2);
+        assert_eq!(pool.cushion_friction, DEFAULT_CUSHION_FRICTION);
         assert_eq!(pool.gravity, 9.81);
         let snooker = ball_parameters(BilliardsMode::Snooker);
         assert_eq!(snooker.mass, 0.140);
         assert_eq!(snooker.radius, 0.026_193_75);
-        assert_eq!(snooker.sliding_friction, 0.5);
-        assert_eq!(snooker.rolling_friction, 0.01);
+        assert_eq!(snooker.sliding_friction, DEFAULT_CLOTH_SLIDING_FRICTION);
+        assert_eq!(snooker.rolling_friction, DEFAULT_CLOTH_ROLLING_FRICTION);
         assert_eq!(snooker.spinning_friction, (4.0 / 9.0) * snooker.radius);
         assert_eq!(snooker.ball_restitution, 0.95);
         assert_eq!(snooker.table_restitution, 0.5);
         assert_eq!(snooker.cushion_restitution, 0.85);
-        assert_eq!(snooker.cushion_friction, 0.5);
+        assert_eq!(snooker.cushion_friction, DEFAULT_CUSHION_FRICTION);
         assert_eq!(snooker.gravity, 9.81);
+
+        for mode in [BilliardsMode::ChineseEightBall, BilliardsMode::Snooker] {
+            let tuned = ball_parameters_with_friction(mode, 0.23, 0.017, 0.31);
+            assert_eq!(tuned.sliding_friction, 0.23);
+            assert_eq!(tuned.rolling_friction, 0.017);
+            assert_eq!(tuned.cushion_friction, 0.31);
+        }
 
         let pool_cue = CueParameters::for_mode(BilliardsMode::ChineseEightBall);
         assert_eq!(pool_cue.mass, 0.567);
@@ -1832,6 +1846,7 @@ mod tests {
                         capture_frames: capture_known_escape,
                         cloth_rolling_friction: DEFAULT_CLOTH_ROLLING_FRICTION,
                         cloth_sliding_friction: DEFAULT_CLOTH_SLIDING_FRICTION,
+                        cushion_friction: DEFAULT_CUSHION_FRICTION,
                         mode: BilliardsMode::ChineseEightBall,
                         shot: Shot {
                             angle,

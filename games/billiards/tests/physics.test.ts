@@ -105,7 +105,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v7");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v8");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -166,6 +166,60 @@ describe("Pooltool-compatible billiards core", () => {
     expect(tunedDefault).toEqual(explicitDefault);
     expect(transitionTime(tunedDefault)).toBeGreaterThan(transitionTime(formerDefaults));
     expect(tunedDefault.durationMs).toBeGreaterThan(formerDefaults.durationMs);
+  });
+
+  it("uses passed cloth friction in snooker instead of mode-specific hardcoded values", () => {
+    const balls = [ball("cue", "cue", 0.7, 1.778 / 2)];
+    const backspinShot = shot({ power: 10, tip: { x: 0, y: -0.5 } });
+    const implicitDefault = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      mode: "snooker",
+      shot: backspinShot,
+    });
+    const explicitDefault = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      clothRollingFriction: 0.01,
+      clothSlidingFriction: 0.08,
+      mode: "snooker",
+      shot: backspinShot,
+    });
+    const originalSnookerValue = simulateBilliardsShot({
+      balls,
+      captureFrames: true,
+      clothRollingFriction: 0.01,
+      clothSlidingFriction: 0.5,
+      mode: "snooker",
+      shot: backspinShot,
+    });
+    const transitionTime = (result: typeof implicitDefault) =>
+      result.events.find(({ kind }) => kind === "sliding_rolling")?.atSeconds ?? Infinity;
+
+    expect(implicitDefault).toEqual(explicitDefault);
+    expect(transitionTime(implicitDefault)).toBeGreaterThan(transitionTime(originalSnookerValue));
+  });
+
+  it("uses configurable ball-cushion friction in both modes", () => {
+    for (const [testMode, y] of [
+      ["chinese-eight-ball", centreY],
+      ["snooker", 1.778 / 2],
+    ] as const) {
+      const input = {
+        balls: [ball("cue", "cue", 0.7, y)],
+        captureFrames: true,
+        clothRollingFriction: 0.01,
+        clothSlidingFriction: 0.08,
+        mode: testMode,
+        shot: shot({ angle: 0.35, power: 40, tip: { x: 0.45, y: 0 } }),
+      };
+      const implicitDefault = simulateBilliardsShot(input);
+      const explicitDefault = simulateBilliardsShot({ ...input, cushionFriction: 0.08 });
+      const highFriction = simulateBilliardsShot({ ...input, cushionFriction: 0.5 });
+
+      expect(implicitDefault).toEqual(explicitDefault);
+      expect(highFriction.stateHash).not.toBe(explicitDefault.stateHash);
+    }
   });
 
   it("contains the high-power angle that previously escaped through a boundary vertex", () => {
@@ -231,6 +285,7 @@ describe("Pooltool-compatible billiards core", () => {
       simulateBilliardsShot({
         balls: [ball("cue", "cue", 0.55, centreY)],
         captureFrames: true,
+        cushionFriction: 0.2,
         mode,
         shot: shot({ power: 42, tip: { x: tipX, y: 0 } }),
       });
@@ -307,16 +362,23 @@ describe("Pooltool-compatible billiards core", () => {
     },
   );
 
-  it("uses the snooker ball and cloth parameter set", () => {
+  it("uses snooker ball dimensions with the shared friction defaults", () => {
     const centre = 1.778 / 2;
     const result = simulateBilliardsShot({
       balls: [ball("cue", "cue", 0.55, centre), ball("red-1", "red", 1.05, centre)],
+      captureFrames: true,
       mode: "snooker",
       shot: shot({ power: 55 }),
     });
 
     expect(result.firstContactBallId).toBe("red-1");
-    expect(result.balls.find(({ id }) => id === "red-1")!.x).toBeGreaterThan(1.05);
+    expect(
+      Math.max(
+        ...result.frames!.map(
+          (frame) => frame.balls.find(({ id }) => id === "red-1")?.x ?? Number.NEGATIVE_INFINITY,
+        ),
+      ),
+    ).toBeGreaterThan(1.05);
   });
 
   it("keeps frame capture out of authoritative hashes", () => {

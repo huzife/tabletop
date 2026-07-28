@@ -165,6 +165,7 @@ function transitionForShot(
     balls: initialBalls,
     clothRollingFriction: normalizedSettings.clothRollingFriction,
     clothSlidingFriction: normalizedSettings.clothSlidingFriction,
+    cushionFriction: normalizedSettings.cushionFriction,
     mode: state.settings.mode,
     shot: action.shot,
   });
@@ -187,6 +188,7 @@ function transitionForShot(
   const shotEvent: BilliardsDisplayEvent = {
     clothRollingFriction: normalizedSettings.clothRollingFriction,
     clothSlidingFriction: normalizedSettings.clothSlidingFriction,
+    cushionFriction: normalizedSettings.cushionFriction,
     durationMs: simulation.durationMs,
     foulCode: resolution.foulCode,
     initialBalls,

@@ -60,6 +60,7 @@ export interface SimulateBilliardsShotInput {
   readonly captureFrames?: boolean;
   readonly clothRollingFriction?: number;
   readonly clothSlidingFriction?: number;
+  readonly cushionFriction?: number;
   readonly mode: BilliardsMode;
   readonly shot: BilliardsShot;
 }
@@ -68,6 +69,7 @@ export interface PredictBilliardsTrajectoryInput {
   readonly balls: readonly BilliardsBall[];
   readonly clothRollingFriction?: number;
   readonly clothSlidingFriction?: number;
+  readonly cushionFriction?: number;
   readonly maxFrames?: number;
   readonly mode: BilliardsMode;
   readonly shot: BilliardsShot;

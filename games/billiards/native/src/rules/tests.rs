@@ -9,6 +9,7 @@ fn settings(mode: BilliardsMode) -> BilliardsSettings {
     BilliardsSettings {
         cloth_rolling_friction: crate::model::DEFAULT_CLOTH_ROLLING_FRICTION,
         cloth_sliding_friction: crate::model::DEFAULT_CLOTH_SLIDING_FRICTION,
+        cushion_friction: crate::model::DEFAULT_CUSHION_FRICTION,
         mode,
     }
 }

@@ -1,13 +1,16 @@
 use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v7";
+pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v8";
 pub const DEFAULT_CLOTH_SLIDING_FRICTION: f64 = 0.08;
 pub const DEFAULT_CLOTH_ROLLING_FRICTION: f64 = 0.01;
+pub const DEFAULT_CUSHION_FRICTION: f64 = 0.08;
 pub const MIN_CLOTH_SLIDING_FRICTION: f64 = 0.04;
-pub const MAX_CLOTH_SLIDING_FRICTION: f64 = 0.2;
+pub const MAX_CLOTH_SLIDING_FRICTION: f64 = 0.5;
 pub const MIN_CLOTH_ROLLING_FRICTION: f64 = 0.003;
 pub const MAX_CLOTH_ROLLING_FRICTION: f64 = 0.02;
+pub const MIN_CUSHION_FRICTION: f64 = 0.04;
+pub const MAX_CUSHION_FRICTION: f64 = 0.5;
 
 pub const fn default_cloth_sliding_friction() -> f64 {
     DEFAULT_CLOTH_SLIDING_FRICTION
@@ -15,6 +18,10 @@ pub const fn default_cloth_sliding_friction() -> f64 {
 
 pub const fn default_cloth_rolling_friction() -> f64 {
     DEFAULT_CLOTH_ROLLING_FRICTION
+}
+
+pub const fn default_cushion_friction() -> f64 {
+    DEFAULT_CUSHION_FRICTION
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -85,6 +92,8 @@ pub struct SimulateShotInput {
     pub cloth_rolling_friction: f64,
     #[serde(default = "default_cloth_sliding_friction")]
     pub cloth_sliding_friction: f64,
+    #[serde(default = "default_cushion_friction")]
+    pub cushion_friction: f64,
     pub mode: BilliardsMode,
     pub shot: Shot,
 }
@@ -97,6 +106,8 @@ pub struct PredictShotInput {
     pub cloth_rolling_friction: f64,
     #[serde(default = "default_cloth_sliding_friction")]
     pub cloth_sliding_friction: f64,
+    #[serde(default = "default_cushion_friction")]
+    pub cushion_friction: f64,
     pub mode: BilliardsMode,
     pub shot: Shot,
     #[serde(default = "default_prediction_frames")]

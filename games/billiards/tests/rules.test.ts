@@ -213,6 +213,7 @@ describe("standard billiards setups", () => {
     expect(parsed).toEqual({
       clothRollingFriction: 0.01,
       clothSlidingFriction: 0.08,
+      cushionFriction: 0.08,
       mode: "snooker",
     });
     expect(
@@ -225,6 +226,7 @@ describe("standard billiards setups", () => {
       { label: "模式", value: "斯诺克" },
       { label: "滑动摩擦", value: "0.080" },
       { label: "滚动摩擦", value: "0.010" },
+      { label: "库边摩擦", value: "0.080" },
     ]);
     expect(
       billiardsSettings.schema.safeParse({
@@ -233,10 +235,23 @@ describe("standard billiards setups", () => {
         mode: "chinese-eight-ball",
       }).success,
     ).toBe(false);
+    expect(
+      billiardsSettings.schema.safeParse({
+        clothSlidingFriction: 0.5,
+        mode: "snooker",
+      }).success,
+    ).toBe(true);
+    expect(
+      billiardsSettings.schema.safeParse({
+        cushionFriction: 0.03,
+        mode: "snooker",
+      }).success,
+    ).toBe(false);
     expect(billiardsSettings.summarize(billiardsSettings.defaultValue)).toEqual([
       { label: "模式", value: "中式八球" },
       { label: "滑动摩擦", value: "0.080" },
       { label: "滚动摩擦", value: "0.010" },
+      { label: "库边摩擦", value: "0.080" },
     ]);
   });
 
@@ -1418,6 +1433,7 @@ describe("authoritative action permissions", () => {
     const legacyEvent: {
       clothRollingFriction?: number;
       clothSlidingFriction?: number;
+      cushionFriction?: number;
       physicsVersion?: string | null;
       simulationStateHash?: string | null;
       spinConvergence: number;
@@ -1430,6 +1446,7 @@ describe("authoritative action permissions", () => {
     };
     delete legacyEvent.clothRollingFriction;
     delete legacyEvent.clothSlidingFriction;
+    delete legacyEvent.cushionFriction;
     delete legacyEvent.physicsVersion;
     delete legacyEvent.simulationStateHash;
     const parsedLegacyEvent = billiardsDisplayEventSchema.parse(legacyEvent);
@@ -1438,12 +1455,14 @@ describe("authoritative action permissions", () => {
     expect(parsedLegacyEvent.simulationStateHash).toBeNull();
     expect(parsedLegacyEvent.clothRollingFriction).toBe(0.01);
     expect(parsedLegacyEvent.clothSlidingFriction).toBe(0.08);
+    expect(parsedLegacyEvent.cushionFriction).toBe(0.08);
     expect(parsedLegacyEvent).not.toHaveProperty("spinConvergence");
     expect(parsedLegacyEvent).not.toHaveProperty("tableFriction");
     expect(event).toHaveProperty("initialBalls");
-    expect(event.physicsVersion).toBe("tabletop-billiards-scene-v7");
+    expect(event.physicsVersion).toBe("tabletop-billiards-scene-v8");
     expect(event.clothRollingFriction).toBe(initial.settings.clothRollingFriction);
     expect(event.clothSlidingFriction).toBe(initial.settings.clothSlidingFriction);
+    expect(event.cushionFriction).toBe(initial.settings.cushionFriction);
     expect(event.simulationStateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(event).not.toHaveProperty("spinConvergence");
     expect(event).not.toHaveProperty("tableFriction");
@@ -1453,6 +1472,7 @@ describe("authoritative action permissions", () => {
       balls: event.initialBalls,
       clothRollingFriction: event.clothRollingFriction,
       clothSlidingFriction: event.clothSlidingFriction,
+      cushionFriction: event.cushionFriction,
       mode: event.mode,
       shot: event.shot,
     });

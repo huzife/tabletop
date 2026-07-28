@@ -1027,6 +1027,7 @@ function useBilliardsPlayback(displayEvents: readonly BilliardsDisplayEvent[]): 
             captureFrames: true,
             clothRollingFriction: event.clothRollingFriction,
             clothSlidingFriction: event.clothSlidingFriction,
+            cushionFriction: event.cushionFriction,
             mode: event.mode,
             shot: event.shot,
           })) as {

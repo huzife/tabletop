@@ -80,10 +80,13 @@ describe("web routes", () => {
     fireEvent.click(screen.getByRole("radio", { name: /斯诺克/ }));
     const slidingFriction = screen.getByRole("slider", { name: "滑动摩擦" });
     const rollingFriction = screen.getByRole("slider", { name: "滚动摩擦" });
+    const cushionFriction = screen.getByRole("slider", { name: "库边摩擦" });
     expect(slidingFriction).toBeEnabled();
     expect(rollingFriction).toBeEnabled();
+    expect(cushionFriction).toBeEnabled();
     fireEvent.change(slidingFriction, { target: { value: "0.12" } });
     fireEvent.change(rollingFriction, { target: { value: "0.015" } });
+    fireEvent.change(cushionFriction, { target: { value: "0.3" } });
     fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
 
     await waitFor(() => expect(createRoomBody).toBeDefined());
@@ -93,6 +96,7 @@ describe("web routes", () => {
       settings: {
         clothRollingFriction: 0.015,
         clothSlidingFriction: 0.12,
+        cushionFriction: 0.3,
         mode: "snooker",
       },
     });
