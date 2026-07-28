@@ -94,6 +94,16 @@ describe("Pooltool-compatible billiards core", () => {
     });
   });
 
+  it("accepts the increased maximum shot power and maps it to cue speed", () => {
+    const result = simulateBilliardsShot({
+      balls: [ball("cue", "cue", 0.55, centreY)],
+      mode,
+      shot: shot({ power: 150 }),
+    });
+
+    expect(result.cueStrike.cueSpeed).toBe(6);
+  });
+
   it("is deterministic and resolves a single event at a time", () => {
     const balls = [
       ball("cue", "cue", 0.4, centreY),
@@ -105,7 +115,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v8");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v9");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -421,7 +431,7 @@ describe("Pooltool-compatible billiards core", () => {
     expect(first.checksum).toBe(simulation.checksum);
     expect(first.stateHash).toBe(simulation.stateHash);
     expect(first.physicsVersion).toBe(coreInfo.physicsVersion);
-    expect(coreInfo.rulesVersion).toMatch(/^tabletop-billiards-rules-v\d+$/);
+    expect(coreInfo.rulesVersion).toBe("tabletop-billiards-rules-v3");
     expect(first.paths.map(({ id }) => id)).toEqual(["cue", "one"]);
     expect(first.paths.every(({ points }) => points.length >= 2 && points.length <= 7)).toBe(true);
     expect(first.paths.every(({ points }) => points[0]?.atMs === 0)).toBe(true);

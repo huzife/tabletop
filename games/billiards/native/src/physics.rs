@@ -5,10 +5,10 @@ use crate::model::{
     Ball, BallKind, BallParameters, BilliardsMode, CueStrikeDiagnostics,
     DEFAULT_CLOTH_ROLLING_FRICTION, DEFAULT_CLOTH_SLIDING_FRICTION, DEFAULT_CUSHION_FRICTION,
     DynamicBall, MAX_CLOTH_ROLLING_FRICTION, MAX_CLOTH_SLIDING_FRICTION, MAX_CUSHION_FRICTION,
-    MIN_CLOTH_ROLLING_FRICTION, MIN_CLOTH_SLIDING_FRICTION, MIN_CUSHION_FRICTION, MotionState,
-    PHYSICS_VERSION, PredictShotInput, PredictedBallPath, PredictedPathPoint, Shot,
-    ShotSimulationResult, SimulateShotInput, SimulationBallFrame, SimulationEvent, SimulationFrame,
-    TableSpec, TrajectoryPrediction,
+    MAX_SHOT_POWER, MIN_CLOTH_ROLLING_FRICTION, MIN_CLOTH_SLIDING_FRICTION, MIN_CUSHION_FRICTION,
+    MIN_SHOT_POWER, MotionState, PHYSICS_VERSION, PredictShotInput, PredictedBallPath,
+    PredictedPathPoint, Shot, ShotSimulationResult, SimulateShotInput, SimulationBallFrame,
+    SimulationEvent, SimulationFrame, TableSpec, TrajectoryPrediction,
 };
 use crate::replay::{legacy_checksum, state_hash};
 use crate::stronge;
@@ -456,7 +456,7 @@ fn validate_input(input: &SimulateShotInput) -> Result<(), CoreError> {
     }
     if !(-std::f64::consts::PI..=std::f64::consts::PI).contains(&shot.angle)
         || !(0.0..=90.0).contains(&shot.elevation)
-        || !(1.0..=100.0).contains(&shot.power)
+        || !(MIN_SHOT_POWER..=MAX_SHOT_POWER).contains(&shot.power)
         || shot.tip.x * shot.tip.x + shot.tip.y * shot.tip.y
             > 0.95_f64.powi(2) + CUE_TIP_ROUNDING_TOLERANCE
     {
@@ -1852,7 +1852,7 @@ mod tests {
                             angle,
                             elevation: 0.0,
                             nominated_color: None,
-                            power: 100.0,
+                            power: MAX_SHOT_POWER,
                             tip,
                         },
                     })

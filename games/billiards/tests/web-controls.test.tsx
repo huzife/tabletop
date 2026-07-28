@@ -367,7 +367,7 @@ describe("billiards opponent aim preview", () => {
       event: {
         angle: Math.PI / 3,
         elevation: 18,
-        power: 72,
+        power: 150,
         shotNumber: 4,
         tip: { x: 0.35, y: -0.2 },
         type: "billiards.aim-preview",
@@ -378,7 +378,7 @@ describe("billiards opponent aim preview", () => {
 
     expect(opponentAimPreview(view, transient)).toMatchObject({
       elevation: 18,
-      power: 72,
+      power: 150,
       tip: { x: 0.35, y: -0.2 },
     });
     expect(opponentAimPreview({ ...view, shotNumber: 5 }, transient)).toBeNull();

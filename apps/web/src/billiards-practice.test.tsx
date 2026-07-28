@@ -44,6 +44,7 @@ describe("billiards solo practice view", () => {
     expect(screen.getByText("位置 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出杆" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "认输" })).toBeEnabled();
+    expect(screen.getByRole("slider", { name: "力度" })).toHaveAttribute("max", "150");
     expect(screen.queryByText("目标彩球")).not.toBeInTheDocument();
   });
 

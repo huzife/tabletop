@@ -5,6 +5,8 @@ export type SnookerColor = z.infer<typeof snookerColorSchema>;
 
 const CUE_TIP_RADIUS = 0.95;
 const CUE_TIP_ROUNDING_TOLERANCE = 1e-12;
+export const MIN_BILLIARDS_SHOT_POWER = 1;
+export const MAX_BILLIARDS_SHOT_POWER = 150;
 
 // Shooter-view cue-ball face: X is left-negative/right-positive and Y is
 // bottom-negative/top-positive.
@@ -25,7 +27,7 @@ export const billiardsShotSchema = z.strictObject({
   angle: z.number().finite().min(-Math.PI).max(Math.PI),
   elevation: z.number().finite().min(0).max(90),
   nominatedColor: snookerColorSchema.nullable(),
-  power: z.number().finite().min(1).max(100),
+  power: z.number().finite().min(MIN_BILLIARDS_SHOT_POWER).max(MAX_BILLIARDS_SHOT_POWER),
   tip: cueTipSchema,
 });
 export type BilliardsShot = z.infer<typeof billiardsShotSchema>;

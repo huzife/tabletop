@@ -9,14 +9,16 @@ import type {
 
 import { simulateBilliardsShot } from "../physics/browser.js";
 import { billiardsSceneAsset } from "../physics/scene-assets.js";
-import type {
-  BilliardsAction,
-  BilliardsBreakChoice,
-  BilliardsDecidingBlackChoice,
-  BilliardsSelectableGroup,
-  BilliardsShot,
-  CueTip,
-  SnookerColor,
+import {
+  MAX_BILLIARDS_SHOT_POWER,
+  MIN_BILLIARDS_SHOT_POWER,
+  type BilliardsAction,
+  type BilliardsBreakChoice,
+  type BilliardsDecidingBlackChoice,
+  type BilliardsSelectableGroup,
+  type BilliardsShot,
+  type CueTip,
+  type SnookerColor,
 } from "../shared/actions.js";
 import type { BilliardsMode } from "../shared/settings.js";
 import { formatBilliardsMode } from "../shared/settings.js";
@@ -296,8 +298,8 @@ export function BilliardsGameView({
                 disabled={shotControlsDisabled}
                 id="billiards-power"
                 label="力度"
-                max={100}
-                min={1}
+                max={MAX_BILLIARDS_SHOT_POWER}
+                min={MIN_BILLIARDS_SHOT_POWER}
                 onChange={setPower}
                 suffix="%"
                 value={displayedAim.power}

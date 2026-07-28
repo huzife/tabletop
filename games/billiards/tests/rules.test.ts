@@ -267,6 +267,21 @@ describe("standard billiards setups", () => {
     ).toBe(true);
   });
 
+  it("accepts shot power through the increased upper bound", () => {
+    expect(
+      billiardsActionSchema.safeParse({
+        shot: { ...shot(), power: 150 },
+        type: "billiards.shoot",
+      }).success,
+    ).toBe(true);
+    expect(
+      billiardsActionSchema.safeParse({
+        shot: { ...shot(), power: 150.001 },
+        type: "billiards.shoot",
+      }).success,
+    ).toBe(false);
+  });
+
   it("builds a legal deterministic Chinese eight-ball rack", () => {
     const balls = createChineseEightBallRack();
     const table = getBilliardsTableSpec("chinese-eight-ball");
@@ -1459,7 +1474,7 @@ describe("authoritative action permissions", () => {
     expect(parsedLegacyEvent).not.toHaveProperty("spinConvergence");
     expect(parsedLegacyEvent).not.toHaveProperty("tableFriction");
     expect(event).toHaveProperty("initialBalls");
-    expect(event.physicsVersion).toBe("tabletop-billiards-scene-v8");
+    expect(event.physicsVersion).toBe("tabletop-billiards-scene-v9");
     expect(event.clothRollingFriction).toBe(initial.settings.clothRollingFriction);
     expect(event.clothSlidingFriction).toBe(initial.settings.clothSlidingFriction);
     expect(event.cushionFriction).toBe(initial.settings.cushionFriction);
@@ -1505,7 +1520,7 @@ describe("authoritative action permissions", () => {
         shot: {
           ...shot(),
           angle: -Math.PI + (5 * Math.PI) / 72,
-          power: 100,
+          power: 150,
         },
         type: "billiards.shoot",
       },

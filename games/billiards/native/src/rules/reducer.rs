@@ -11,6 +11,7 @@ use super::types::{
     BilliardsMatchState, BilliardsMode, BilliardsPhase, BilliardsShot, BilliardsSimulationResult,
     ShotAdjudicationInput, SnookerOn,
 };
+use crate::model::{MAX_SHOT_POWER, MIN_SHOT_POWER};
 
 /// External facts needed by the pure action reducer.
 #[derive(Clone, Copy, Debug, Default)]
@@ -29,7 +30,7 @@ fn validate_shot(shot: &BilliardsShot) -> RuleResult<()> {
         || !shot.elevation.is_finite()
         || !(0.0..=90.0).contains(&shot.elevation)
         || !shot.power.is_finite()
-        || !(1.0..=100.0).contains(&shot.power)
+        || !(MIN_SHOT_POWER..=MAX_SHOT_POWER).contains(&shot.power)
         || !shot.tip.x.is_finite()
         || !shot.tip.y.is_finite()
         || shot.tip.x.abs() > 0.95
