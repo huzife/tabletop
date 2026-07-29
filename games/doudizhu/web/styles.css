@@ -4,7 +4,7 @@
     linear-gradient(180deg, rgba(255, 253, 246, 0.62), rgba(232, 241, 234, 0.42)),
     url("./assets/table-background.webp") center / cover;
   color: var(--ddz-ink);
-  container-type: inline-size;
+  container-type: size;
   font-family: Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif;
   height: 100%;
   min-height: 0;
@@ -39,6 +39,17 @@
   opacity: 0.12;
   pointer-events: none;
   position: absolute;
+}
+
+.doudizhu-ui {
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  transform: scale(1);
+  transform-origin: left top;
+  width: 100%;
+  z-index: 4;
 }
 
 .doudizhu-topbar {
@@ -255,7 +266,7 @@
   box-shadow: 0 8px 24px rgba(43, 67, 53, 0.12);
   display: grid;
   gap: 6px 0;
-  grid-auto-rows: 66px;
+  grid-auto-rows: 62px;
   grid-template-columns: repeat(10, 31px);
   margin-left: 6px;
   padding: 8px 14px 8px 8px;
@@ -366,7 +377,7 @@
 
 .doudizhu-hand .doudizhu-card {
   animation: doudizhu-deal-in 260ms ease-out both;
-  margin-left: clamp(-40px, calc((100cqw - 1320px) / 19), -16px);
+  margin-left: clamp(-38px, calc((100cqw - 1240px) / 19), -14px);
 }
 
 .doudizhu-hand .doudizhu-card:first-child {
@@ -389,7 +400,7 @@
   transition:
     transform 140ms ease,
     box-shadow 140ms ease;
-  width: 66px;
+  width: 62px;
 }
 
 button.doudizhu-card {
@@ -459,8 +470,8 @@ button.doudizhu-card:disabled {
 .doudizhu-card.is-compact,
 .doudizhu-card-back.is-compact {
   border-radius: 5px;
-  height: 66px;
-  width: 46px;
+  height: 62px;
+  width: 40px;
 }
 
 .doudizhu-card.is-compact .doudizhu-card__rank {
@@ -586,39 +597,50 @@ button.doudizhu-card:disabled {
   }
 }
 
-@media (max-height: 760px) {
-  .doudizhu-game::after {
-    bottom: 89px;
+@container (max-width: 980px) {
+  .doudizhu-ui {
+    height: 113.636%;
+    transform: scale(0.88);
+    width: 113.636%;
   }
 
-  .doudizhu-seat--bottom {
-    bottom: 140px;
+  .doudizhu-hand .doudizhu-card {
+    margin-left: clamp(-38px, calc((113.636cqw - 1240px) / 19), -14px);
+  }
+}
+
+@container (max-height: 660px) {
+  .doudizhu-ui {
+    height: 113.636%;
+    transform: scale(0.88);
+    width: 113.636%;
   }
 
-  .doudizhu-controls {
-    bottom: 109px;
+  .doudizhu-hand .doudizhu-card {
+    margin-left: clamp(-38px, calc((113.636cqw - 1240px) / 19), -14px);
+  }
+}
+
+@container (max-width: 720px) {
+  .doudizhu-ui {
+    height: 128.205%;
+    transform: scale(0.78);
+    width: 128.205%;
   }
 
-  .doudizhu-hand {
-    bottom: 7px;
-    height: 94px;
+  .doudizhu-hand .doudizhu-card {
+    margin-left: clamp(-38px, calc((128.205cqw - 1240px) / 19), -14px);
+  }
+}
+
+@container (max-height: 520px) {
+  .doudizhu-ui {
+    height: 128.205%;
+    transform: scale(0.78);
+    width: 128.205%;
   }
 
-  .doudizhu-revealed-hand {
-    gap: 5px 0;
-    grid-auto-rows: 60px;
-    grid-template-columns: repeat(10, 27px);
-    padding: 7px 13px 7px 7px;
-  }
-
-  .doudizhu-card.is-compact,
-  .doudizhu-card-back.is-compact {
-    height: 60px;
-    width: 42px;
-  }
-
-  .doudizhu-card {
-    height: 84px;
-    width: 58px;
+  .doudizhu-hand .doudizhu-card {
+    margin-left: clamp(-38px, calc((128.205cqw - 1240px) / 19), -14px);
   }
 }

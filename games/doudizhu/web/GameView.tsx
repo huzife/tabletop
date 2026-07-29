@@ -102,237 +102,239 @@ export function DoudizhuGameView({
       className={`doudizhu-game doudizhu-game--${view.phase}${impactEvent ? " has-impact" : ""}`}
     >
       <div aria-hidden="true" className="doudizhu-game__ambient" />
-      <header className="doudizhu-topbar">
-        <div className="doudizhu-brand">
-          <span className="doudizhu-brand__seal">斗</span>
-          <div>
-            <strong>经典抢地主</strong>
-            <span>第 {view.dealNumber} 副牌</span>
+      <div className="doudizhu-ui">
+        <header className="doudizhu-topbar">
+          <div className="doudizhu-brand">
+            <span className="doudizhu-brand__seal">斗</span>
+            <div>
+              <strong>经典抢地主</strong>
+              <span>第 {view.dealNumber} 副牌</span>
+            </div>
           </div>
-        </div>
-        <div
-          aria-label={`当前公共倍数 ${view.multiplier.common} 倍`}
-          className="doudizhu-multiplier"
-        >
-          <span>公共倍数</span>
-          <strong>×{view.multiplier.common}</strong>
-          <small>
-            抢 {view.multiplier.robCount} · 炸 {view.multiplier.bombCount}
-            {view.multiplier.openHand ? " · 明牌" : ""}
-          </small>
-        </div>
-        <span className={`doudizhu-connection is-${connectionState}`}>
-          <Radio aria-hidden="true" size={18} />
-          {connectionState === "connected"
-            ? "已连接"
-            : connectionState === "reconnecting"
-              ? "重连中"
-              : "已离线"}
-        </span>
-      </header>
-
-      <div className="doudizhu-bottom-cards" aria-label="地主底牌">
-        {view.bottomCards.length === 0
-          ? Array.from({ length: 3 }, (_, index) => <CardBack compact key={`bottom-${index}`} />)
-          : view.bottomCards.map((card) => <PlayingCard card={card} compact key={card.id} />)}
-      </div>
-
-      {tableSeats.map(({ seat, position }) => {
-        const visibleHand = view.visibleHands.find(({ seatId }) => seat.seatId === seatId);
-        const isViewer = seat.seatId === view.viewerSeatId;
-        const displayName = seatDisplayName(view, seat.seatId, seatPresentations);
-        const positionLabel = seatLabel(view, seat.seatId);
-        return (
-          <section
-            aria-label={`${displayName}，${positionLabel}，剩余 ${seat.cardCount} 张`}
-            className={`doudizhu-seat doudizhu-seat--${position}${seat.isCurrent ? " is-current" : ""}`}
-            key={seat.seatId}
+          <div
+            aria-label={`当前公共倍数 ${view.multiplier.common} 倍`}
+            className="doudizhu-multiplier"
           >
-            <div className="doudizhu-seat__avatar">
-              {seat.role === "landlord" ? (
-                <Crown aria-label="地主" size={25} />
-              ) : seat.controller === "bot" || seat.controller.endsWith("_ai") ? (
-                <Sparkles aria-label="AI" size={23} />
-              ) : (
-                <span aria-hidden="true">
-                  {isViewer ? "我" : position === "left" ? "上" : "下"}
+            <span>公共倍数</span>
+            <strong>×{view.multiplier.common}</strong>
+            <small>
+              抢 {view.multiplier.robCount} · 炸 {view.multiplier.bombCount}
+              {view.multiplier.openHand ? " · 明牌" : ""}
+            </small>
+          </div>
+          <span className={`doudizhu-connection is-${connectionState}`}>
+            <Radio aria-hidden="true" size={18} />
+            {connectionState === "connected"
+              ? "已连接"
+              : connectionState === "reconnecting"
+                ? "重连中"
+                : "已离线"}
+          </span>
+        </header>
+
+        <div className="doudizhu-bottom-cards" aria-label="地主底牌">
+          {view.bottomCards.length === 0
+            ? Array.from({ length: 3 }, (_, index) => <CardBack compact key={`bottom-${index}`} />)
+            : view.bottomCards.map((card) => <PlayingCard card={card} compact key={card.id} />)}
+        </div>
+
+        {tableSeats.map(({ seat, position }) => {
+          const visibleHand = view.visibleHands.find(({ seatId }) => seat.seatId === seatId);
+          const isViewer = seat.seatId === view.viewerSeatId;
+          const displayName = seatDisplayName(view, seat.seatId, seatPresentations);
+          const positionLabel = seatLabel(view, seat.seatId);
+          return (
+            <section
+              aria-label={`${displayName}，${positionLabel}，剩余 ${seat.cardCount} 张`}
+              className={`doudizhu-seat doudizhu-seat--${position}${seat.isCurrent ? " is-current" : ""}`}
+              key={seat.seatId}
+            >
+              <div className="doudizhu-seat__avatar">
+                {seat.role === "landlord" ? (
+                  <Crown aria-label="地主" size={25} />
+                ) : seat.controller === "bot" || seat.controller.endsWith("_ai") ? (
+                  <Sparkles aria-label="AI" size={23} />
+                ) : (
+                  <span aria-hidden="true">
+                    {isViewer ? "我" : position === "left" ? "上" : "下"}
+                  </span>
+                )}
+              </div>
+              <div className="doudizhu-seat__meta">
+                <strong title={displayName}>{displayName}</strong>
+                <span>
+                  {positionLabel} ·{" "}
+                  {seat.role === "landlord" ? "地主" : seat.role === "farmer" ? "农民" : "等待叫牌"}{" "}
+                  · {seat.cardCount} 张
                 </span>
-              )}
+                {seat.doubled ? <em>已加倍</em> : null}
+              </div>
+              {visibleHand ? (
+                <div className="doudizhu-revealed-hand" aria-label={`${displayName}的明牌手牌`}>
+                  {sortDoudizhuCards(visibleHand.cards).map((card) => (
+                    <PlayingCard card={card} compact key={card.id} />
+                  ))}
+                </div>
+              ) : !isViewer ? (
+                <div className="doudizhu-card-stack" aria-hidden="true">
+                  <CardBack compact />
+                  <span>{seat.cardCount}</span>
+                </div>
+              ) : null}
+            </section>
+          );
+        })}
+
+        <main className="doudizhu-trick" aria-live="polite">
+          <p className="doudizhu-status">{statusText(view, seatPresentations)}</p>
+          {view.lastPlay === null ? (
+            <div className="doudizhu-empty-trick">
+              {view.phase === "playing" ? "等待领出" : phasePrompt(view)}
             </div>
-            <div className="doudizhu-seat__meta">
-              <strong title={displayName}>{displayName}</strong>
-              <span>
-                {positionLabel} ·{" "}
-                {seat.role === "landlord" ? "地主" : seat.role === "farmer" ? "农民" : "等待叫牌"} ·{" "}
-                {seat.cardCount} 张
+          ) : (
+            <div>
+              <span className="doudizhu-trick__label">
+                {seatDisplayName(view, view.lastPlay.seatId, seatPresentations)} ·{" "}
+                {PATTERN_NAMES[view.lastPlay.pattern.kind]}
               </span>
-              {seat.doubled ? <em>已加倍</em> : null}
-            </div>
-            {visibleHand ? (
-              <div className="doudizhu-revealed-hand" aria-label={`${displayName}的明牌手牌`}>
-                {sortDoudizhuCards(visibleHand.cards).map((card) => (
+              <div className="doudizhu-trick__cards">
+                {view.lastPlay.cards.map((card) => (
                   <PlayingCard card={card} compact key={card.id} />
                 ))}
               </div>
-            ) : !isViewer ? (
-              <div className="doudizhu-card-stack" aria-hidden="true">
-                <CardBack compact />
-                <span>{seat.cardCount}</span>
-              </div>
-            ) : null}
-          </section>
-        );
-      })}
-
-      <main className="doudizhu-trick" aria-live="polite">
-        <p className="doudizhu-status">{statusText(view, seatPresentations)}</p>
-        {view.lastPlay === null ? (
-          <div className="doudizhu-empty-trick">
-            {view.phase === "playing" ? "等待领出" : phasePrompt(view)}
-          </div>
-        ) : (
-          <div>
-            <span className="doudizhu-trick__label">
-              {seatDisplayName(view, view.lastPlay.seatId, seatPresentations)} ·{" "}
-              {PATTERN_NAMES[view.lastPlay.pattern.kind]}
-            </span>
-            <div className="doudizhu-trick__cards">
-              {view.lastPlay.cards.map((card) => (
-                <PlayingCard card={card} compact key={card.id} />
-              ))}
             </div>
-          </div>
-        )}
-        {view.passedSeatIds.length > 0 ? (
-          <p className="doudizhu-passes">
-            {view.passedSeatIds
-              .map((seatId) => `${seatDisplayName(view, seatId, seatPresentations)}不出`)
-              .join(" · ")}
-          </p>
-        ) : null}
-      </main>
+          )}
+          {view.passedSeatIds.length > 0 ? (
+            <p className="doudizhu-passes">
+              {view.passedSeatIds
+                .map((seatId) => `${seatDisplayName(view, seatId, seatPresentations)}不出`)
+                .join(" · ")}
+            </p>
+          ) : null}
+        </main>
 
-      {view.outcome ? <OutcomePanel seats={seatPresentations} view={view} /> : null}
+        {view.outcome ? <OutcomePanel seats={seatPresentations} view={view} /> : null}
 
-      <div className="doudizhu-controls">
-        {view.legalActions.canCall || view.legalActions.canPassBid ? (
-          <>
-            {view.legalActions.canCall ? (
+        <div className="doudizhu-controls">
+          {view.legalActions.canCall || view.legalActions.canPassBid ? (
+            <>
+              {view.legalActions.canCall ? (
+                <Button
+                  disabled={controlsDisabled}
+                  onClick={() => dispatchAction({ type: "doudizhu.bid.call" })}
+                  variant="primary"
+                >
+                  叫地主
+                </Button>
+              ) : null}
+              {view.legalActions.canRob ? (
+                <Button
+                  disabled={controlsDisabled}
+                  onClick={() => dispatchAction({ type: "doudizhu.bid.rob" })}
+                  variant="primary"
+                >
+                  {view.viewerSeatId === view.initialCallerSeatId ? "反抢" : "抢地主"}
+                </Button>
+              ) : null}
               <Button
                 disabled={controlsDisabled}
-                onClick={() => dispatchAction({ type: "doudizhu.bid.call" })}
-                variant="primary"
-              >
-                叫地主
-              </Button>
-            ) : null}
-            {view.legalActions.canRob ? (
-              <Button
-                disabled={controlsDisabled}
-                onClick={() => dispatchAction({ type: "doudizhu.bid.rob" })}
-                variant="primary"
-              >
-                {view.viewerSeatId === view.initialCallerSeatId ? "反抢" : "抢地主"}
-              </Button>
-            ) : null}
-            <Button
-              disabled={controlsDisabled}
-              onClick={() => dispatchAction({ type: "doudizhu.bid.pass" })}
-              variant="secondary"
-            >
-              {view.legalActions.canRob ? "不抢" : "不叫"}
-            </Button>
-          </>
-        ) : null}
-        {view.legalActions.canChooseOpenHand ? (
-          <>
-            <Button
-              disabled={controlsDisabled}
-              onClick={() => dispatchAction({ type: "doudizhu.open-hand", open: true })}
-              variant="primary"
-            >
-              明牌 ×2
-            </Button>
-            <Button
-              disabled={controlsDisabled}
-              onClick={() => dispatchAction({ type: "doudizhu.open-hand", open: false })}
-              variant="secondary"
-            >
-              不明牌
-            </Button>
-          </>
-        ) : null}
-        {view.legalActions.canDouble ? (
-          <>
-            <Button
-              disabled={controlsDisabled}
-              onClick={() => dispatchAction({ type: "doudizhu.double", double: true })}
-              variant="primary"
-            >
-              加倍
-            </Button>
-            <Button
-              disabled={controlsDisabled}
-              onClick={() => dispatchAction({ type: "doudizhu.double", double: false })}
-              variant="secondary"
-            >
-              不加倍
-            </Button>
-          </>
-        ) : null}
-        {view.phase === "playing" && view.viewerSeatId !== null ? (
-          <>
-            <Button
-              disabled={controlsDisabled || !view.legalActions.canPlay || hints.length === 0}
-              onClick={showHint}
-              variant="secondary"
-            >
-              <Lightbulb aria-hidden="true" size={19} />
-              提示
-            </Button>
-            {view.legalActions.canPass ? (
-              <Button
-                disabled={controlsDisabled}
-                onClick={() => dispatchAction({ type: "doudizhu.pass" })}
+                onClick={() => dispatchAction({ type: "doudizhu.bid.pass" })}
                 variant="secondary"
               >
-                不出
+                {view.legalActions.canRob ? "不抢" : "不叫"}
               </Button>
-            ) : null}
-            <Button
-              disabled={
-                controlsDisabled ||
-                !view.legalActions.canPlay ||
-                selectedIds.length === 0 ||
-                !selectionLegal
-              }
-              onClick={() => dispatchAction({ type: "doudizhu.play", cardIds: [...selectedIds] })}
-              variant="primary"
-            >
-              出牌
-              {selectedPattern ? ` · ${PATTERN_NAMES[selectedPattern.kind]}` : ""}
-            </Button>
-          </>
-        ) : null}
-      </div>
+            </>
+          ) : null}
+          {view.legalActions.canChooseOpenHand ? (
+            <>
+              <Button
+                disabled={controlsDisabled}
+                onClick={() => dispatchAction({ type: "doudizhu.open-hand", open: true })}
+                variant="primary"
+              >
+                明牌 ×2
+              </Button>
+              <Button
+                disabled={controlsDisabled}
+                onClick={() => dispatchAction({ type: "doudizhu.open-hand", open: false })}
+                variant="secondary"
+              >
+                不明牌
+              </Button>
+            </>
+          ) : null}
+          {view.legalActions.canDouble ? (
+            <>
+              <Button
+                disabled={controlsDisabled}
+                onClick={() => dispatchAction({ type: "doudizhu.double", double: true })}
+                variant="primary"
+              >
+                加倍
+              </Button>
+              <Button
+                disabled={controlsDisabled}
+                onClick={() => dispatchAction({ type: "doudizhu.double", double: false })}
+                variant="secondary"
+              >
+                不加倍
+              </Button>
+            </>
+          ) : null}
+          {view.phase === "playing" && view.viewerSeatId !== null ? (
+            <>
+              <Button
+                disabled={controlsDisabled || !view.legalActions.canPlay || hints.length === 0}
+                onClick={showHint}
+                variant="secondary"
+              >
+                <Lightbulb aria-hidden="true" size={19} />
+                提示
+              </Button>
+              {view.legalActions.canPass ? (
+                <Button
+                  disabled={controlsDisabled}
+                  onClick={() => dispatchAction({ type: "doudizhu.pass" })}
+                  variant="secondary"
+                >
+                  不出
+                </Button>
+              ) : null}
+              <Button
+                disabled={
+                  controlsDisabled ||
+                  !view.legalActions.canPlay ||
+                  selectedIds.length === 0 ||
+                  !selectionLegal
+                }
+                onClick={() => dispatchAction({ type: "doudizhu.play", cardIds: [...selectedIds] })}
+                variant="primary"
+              >
+                出牌
+                {selectedPattern ? ` · ${PATTERN_NAMES[selectedPattern.kind]}` : ""}
+              </Button>
+            </>
+          ) : null}
+        </div>
 
-      <div className="doudizhu-hand" aria-label="你的手牌" role="list">
-        {view.viewerSeatId === null ? (
-          <div className="doudizhu-spectator-note">
-            <Eye aria-hidden="true" size={21} />
-            观战中 · 暗牌仅显示数量
-          </div>
-        ) : (
-          sortDoudizhuCards(view.viewerHand).map((card) => (
-            <PlayingCard
-              card={card}
-              disabled={!view.legalActions.canPlay || controlsDisabled}
-              key={card.id}
-              onClick={() => toggleCard(card.id)}
-              selected={selectedIds.includes(card.id)}
-            />
-          ))
-        )}
+        <div className="doudizhu-hand" aria-label="你的手牌" role="list">
+          {view.viewerSeatId === null ? (
+            <div className="doudizhu-spectator-note">
+              <Eye aria-hidden="true" size={21} />
+              观战中 · 暗牌仅显示数量
+            </div>
+          ) : (
+            sortDoudizhuCards(view.viewerHand).map((card) => (
+              <PlayingCard
+                card={card}
+                disabled={!view.legalActions.canPlay || controlsDisabled}
+                key={card.id}
+                onClick={() => toggleCard(card.id)}
+                selected={selectedIds.includes(card.id)}
+              />
+            ))
+          )}
+        </div>
       </div>
     </section>
   );

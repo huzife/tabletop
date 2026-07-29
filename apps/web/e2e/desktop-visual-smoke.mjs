@@ -134,17 +134,35 @@ async function verifyDoudizhuRoom(page, viewport, browserErrors) {
         width: rectangle.width,
       };
     };
+    const ui = document.querySelector(".doudizhu-ui");
+    const card = bounds(".doudizhu-hand .doudizhu-card");
+    if (!ui) throw new Error("Missing .doudizhu-ui");
+    const transform = new DOMMatrixReadOnly(getComputedStyle(ui).transform);
     return {
+      card,
       hand: bounds(".doudizhu-hand"),
       placeholder: bounds(".game-module-placeholder"),
       shell: bounds(".doudizhu-game"),
       topbar: bounds(".doudizhu-topbar"),
+      uiScale: transform.a,
     };
   });
 
   assertContained(geometry.placeholder, geometry.shell, "doudizhu shell");
   assertContained(geometry.shell, geometry.topbar, "doudizhu top bar");
   assertContained(geometry.shell, geometry.hand, "doudizhu hand");
+  const cardAspectRatio = geometry.card.width / geometry.card.height;
+  if (cardAspectRatio < 0.63 || cardAspectRatio > 0.66) {
+    throw new Error(
+      `doudizhu card has unexpected aspect ratio: ${geometry.card.width}x${geometry.card.height}`,
+    );
+  }
+  if (viewport.width === 1280 && geometry.uiScale >= 1) {
+    throw new Error(`doudizhu UI did not scale down at 1280x720: ${geometry.uiScale}`);
+  }
+  if (viewport.width === 1920 && Math.abs(geometry.uiScale - 1) > 0.01) {
+    throw new Error(`doudizhu UI unexpectedly scaled at 1920x1080: ${geometry.uiScale}`);
+  }
 }
 
 async function login(page) {
