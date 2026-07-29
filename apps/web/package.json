@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tabletop/game-billiards": "workspace:*",
+    "@tabletop/game-doudizhu": "workspace:*",
     "@tabletop/game-gomoku": "workspace:*",
     "@tabletop/game-ludo": "workspace:*",
     "@tabletop/game-sdk": "workspace:*",

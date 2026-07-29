@@ -1,0 +1,51 @@
+{
+  "name": "@tabletop/game-doudizhu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./shared/index.ts",
+      "development": "./shared/index.ts",
+      "import": "./dist/shared/index.js"
+    },
+    "./server": {
+      "types": "./server/index.ts",
+      "development": "./server/index.ts",
+      "import": "./dist/server/index.js"
+    },
+    "./web": {
+      "types": "./web/index.ts",
+      "development": "./web/index.ts",
+      "import": "./dist/web/index.js"
+    },
+    "./styles.css": "./web/styles.css"
+  },
+  "files": [
+    "dist",
+    "web/styles.css",
+    "web/assets"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/web/assets && cp web/styles.css dist/web/styles.css && cp web/assets/* dist/web/assets/",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tabletop/game-sdk": "workspace:*",
+    "@tabletop/protocol": "workspace:*",
+    "@tabletop/ui": "workspace:*",
+    "lucide-react": "catalog:",
+    "react": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@testing-library/jest-dom": "catalog:testing",
+    "@testing-library/react": "catalog:testing",
+    "jsdom": "catalog:testing",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

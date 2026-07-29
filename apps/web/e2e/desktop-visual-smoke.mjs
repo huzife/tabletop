@@ -96,6 +96,10 @@ async function verifyViewport(viewport) {
     });
     await leaveRoom(page, "ludo");
 
+    await openPracticeMatch(page, "doudizhu", "斗地主", ".doudizhu-game");
+    await verifyDoudizhuRoom(page, viewport, browserErrors);
+    await leaveRoom(page, "doudizhu");
+
     if (browserErrors.length > 0) {
       throw new Error(
         `${viewport.width}x${viewport.height} browser errors:\n${browserErrors.join("\n")}`,
@@ -104,6 +108,43 @@ async function verifyViewport(viewport) {
   } finally {
     await context.close();
   }
+}
+
+async function verifyDoudizhuRoom(page, viewport, browserErrors) {
+  await verifyPage(page, "doudizhu-playing", viewport, browserErrors, [
+    ".app-header",
+    ".room-header",
+    ".room-workspace",
+    ".game-stage",
+    ".doudizhu-topbar",
+    ".doudizhu-controls",
+  ]);
+
+  const geometry = await page.evaluate(() => {
+    const bounds = (selector) => {
+      const element = document.querySelector(selector);
+      if (!element) throw new Error(`Missing ${selector}`);
+      const rectangle = element.getBoundingClientRect();
+      return {
+        bottom: rectangle.bottom,
+        height: rectangle.height,
+        left: rectangle.left,
+        right: rectangle.right,
+        top: rectangle.top,
+        width: rectangle.width,
+      };
+    };
+    return {
+      hand: bounds(".doudizhu-hand"),
+      placeholder: bounds(".game-module-placeholder"),
+      shell: bounds(".doudizhu-game"),
+      topbar: bounds(".doudizhu-topbar"),
+    };
+  });
+
+  assertContained(geometry.placeholder, geometry.shell, "doudizhu shell");
+  assertContained(geometry.shell, geometry.topbar, "doudizhu top bar");
+  assertContained(geometry.shell, geometry.hand, "doudizhu hand");
 }
 
 async function login(page) {
