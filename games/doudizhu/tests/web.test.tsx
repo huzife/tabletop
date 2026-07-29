@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { GameSeatPresentationV1 } from "@tabletop/game-sdk/web";
 import { seatIdSchema } from "@tabletop/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -45,6 +46,21 @@ describe("doudizhu web controls", () => {
     expect(screen.getByText(/观战中/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /出牌/ })).not.toBeInTheDocument();
   });
+
+  it("shows participant names and a legible wrapped revealed hand", () => {
+    const deck = createDoudizhuDeck();
+    const view = {
+      ...playingView(),
+      visibleHands: [{ seatId: seat2, cards: deck.slice(0, 17) }],
+    };
+    renderGame(view);
+
+    expect(screen.getByText("玩家甲")).toBeInTheDocument();
+    expect(screen.getByText("电脑乙")).toBeInTheDocument();
+    const revealedHand = screen.getByLabelText("电脑乙的明牌手牌");
+    expect(revealedHand).toHaveClass("doudizhu-revealed-hand");
+    expect(revealedHand.querySelectorAll(".doudizhu-card")).toHaveLength(17);
+  });
 });
 
 function renderGame(view: DoudizhuView, dispatchAction = vi.fn(), readOnly = false) {
@@ -55,9 +71,30 @@ function renderGame(view: DoudizhuView, dispatchAction = vi.fn(), readOnly = fal
       dispatchAction={dispatchAction}
       displayEvents={[]}
       readOnly={readOnly}
+      seats={seatPresentations()}
       view={view}
     />,
   );
+}
+
+function seatPresentations(): readonly GameSeatPresentationV1[] {
+  return [
+    {
+      seatId: seat1,
+      displayName: "一号位",
+      occupant: { kind: "human", displayName: "玩家甲" },
+    },
+    {
+      seatId: seat2,
+      displayName: "二号位",
+      occupant: { kind: "bot", displayName: "电脑乙" },
+    },
+    {
+      seatId: seat3,
+      displayName: "三号位",
+      occupant: { kind: "bot", displayName: "电脑丙" },
+    },
+  ];
 }
 
 function biddingView(): DoudizhuView {

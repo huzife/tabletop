@@ -23,6 +23,15 @@ export interface ReceivedGameTransientEventV1 {
   readonly serverTime: string;
 }
 
+export interface GameSeatPresentationV1 {
+  readonly seatId: SeatId;
+  readonly displayName: string;
+  readonly occupant: {
+    readonly kind: "human" | "bot";
+    readonly displayName: string;
+  } | null;
+}
+
 export interface GameViewPropsV1<
   TView extends JsonValue,
   TAction extends GameActionV1,
@@ -34,6 +43,7 @@ export interface GameViewPropsV1<
   readonly actionPending: boolean;
   readonly connectionState: GameConnectionStateV1;
   readonly readOnly: boolean;
+  readonly seats?: readonly GameSeatPresentationV1[];
   readonly transientEvent?: ReceivedGameTransientEventV1 | null;
   readonly dispatchTransientEvent?: (event: GameTransientEventV1) => void;
 }

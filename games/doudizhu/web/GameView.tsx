@@ -1,4 +1,4 @@
-import type { GameViewPropsV1 } from "@tabletop/game-sdk/web";
+import type { GameSeatPresentationV1, GameViewPropsV1 } from "@tabletop/game-sdk/web";
 import { Button } from "@tabletop/ui";
 import { Crown, Eye, Lightbulb, Radio, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -46,6 +46,7 @@ export function DoudizhuGameView({
   connectionState,
   readOnly,
   displayEvents,
+  seats: seatPresentations = [],
 }: GameViewPropsV1<DoudizhuView, DoudizhuAction, DoudizhuDisplayEvent>) {
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
   const [hintIndex, setHintIndex] = useState(0);
@@ -121,7 +122,7 @@ export function DoudizhuGameView({
           </small>
         </div>
         <span className={`doudizhu-connection is-${connectionState}`}>
-          <Radio aria-hidden="true" size={14} />
+          <Radio aria-hidden="true" size={18} />
           {connectionState === "connected"
             ? "已连接"
             : connectionState === "reconnecting"
@@ -139,17 +140,19 @@ export function DoudizhuGameView({
       {tableSeats.map(({ seat, position }) => {
         const visibleHand = view.visibleHands.find(({ seatId }) => seat.seatId === seatId);
         const isViewer = seat.seatId === view.viewerSeatId;
+        const displayName = seatDisplayName(view, seat.seatId, seatPresentations);
+        const positionLabel = seatLabel(view, seat.seatId);
         return (
           <section
-            aria-label={`${seatLabel(view, seat.seatId)}，剩余 ${seat.cardCount} 张`}
+            aria-label={`${displayName}，${positionLabel}，剩余 ${seat.cardCount} 张`}
             className={`doudizhu-seat doudizhu-seat--${position}${seat.isCurrent ? " is-current" : ""}`}
             key={seat.seatId}
           >
             <div className="doudizhu-seat__avatar">
               {seat.role === "landlord" ? (
-                <Crown aria-label="地主" size={20} />
+                <Crown aria-label="地主" size={25} />
               ) : seat.controller === "bot" || seat.controller.endsWith("_ai") ? (
-                <Sparkles aria-label="AI" size={19} />
+                <Sparkles aria-label="AI" size={23} />
               ) : (
                 <span aria-hidden="true">
                   {isViewer ? "我" : position === "left" ? "上" : "下"}
@@ -157,15 +160,16 @@ export function DoudizhuGameView({
               )}
             </div>
             <div className="doudizhu-seat__meta">
-              <strong>{seatLabel(view, seat.seatId)}</strong>
+              <strong title={displayName}>{displayName}</strong>
               <span>
+                {positionLabel} ·{" "}
                 {seat.role === "landlord" ? "地主" : seat.role === "farmer" ? "农民" : "等待叫牌"} ·{" "}
                 {seat.cardCount} 张
               </span>
               {seat.doubled ? <em>已加倍</em> : null}
             </div>
             {visibleHand ? (
-              <div className="doudizhu-revealed-hand" aria-label="明牌手牌">
+              <div className="doudizhu-revealed-hand" aria-label={`${displayName}的明牌手牌`}>
                 {sortDoudizhuCards(visibleHand.cards).map((card) => (
                   <PlayingCard card={card} compact key={card.id} />
                 ))}
@@ -181,7 +185,7 @@ export function DoudizhuGameView({
       })}
 
       <main className="doudizhu-trick" aria-live="polite">
-        <p className="doudizhu-status">{statusText(view)}</p>
+        <p className="doudizhu-status">{statusText(view, seatPresentations)}</p>
         {view.lastPlay === null ? (
           <div className="doudizhu-empty-trick">
             {view.phase === "playing" ? "等待领出" : phasePrompt(view)}
@@ -189,7 +193,8 @@ export function DoudizhuGameView({
         ) : (
           <div>
             <span className="doudizhu-trick__label">
-              {seatLabel(view, view.lastPlay.seatId)} · {PATTERN_NAMES[view.lastPlay.pattern.kind]}
+              {seatDisplayName(view, view.lastPlay.seatId, seatPresentations)} ·{" "}
+              {PATTERN_NAMES[view.lastPlay.pattern.kind]}
             </span>
             <div className="doudizhu-trick__cards">
               {view.lastPlay.cards.map((card) => (
@@ -200,12 +205,14 @@ export function DoudizhuGameView({
         )}
         {view.passedSeatIds.length > 0 ? (
           <p className="doudizhu-passes">
-            {view.passedSeatIds.map((seatId) => `${seatLabel(view, seatId)}不出`).join(" · ")}
+            {view.passedSeatIds
+              .map((seatId) => `${seatDisplayName(view, seatId, seatPresentations)}不出`)
+              .join(" · ")}
           </p>
         ) : null}
       </main>
 
-      {view.outcome ? <OutcomePanel view={view} /> : null}
+      {view.outcome ? <OutcomePanel seats={seatPresentations} view={view} /> : null}
 
       <div className="doudizhu-controls">
         {view.legalActions.canCall || view.legalActions.canPassBid ? (
@@ -280,7 +287,7 @@ export function DoudizhuGameView({
               onClick={showHint}
               variant="secondary"
             >
-              <Lightbulb aria-hidden="true" size={16} />
+              <Lightbulb aria-hidden="true" size={19} />
               提示
             </Button>
             {view.legalActions.canPass ? (
@@ -312,7 +319,7 @@ export function DoudizhuGameView({
       <div className="doudizhu-hand" aria-label="你的手牌" role="list">
         {view.viewerSeatId === null ? (
           <div className="doudizhu-spectator-note">
-            <Eye aria-hidden="true" size={18} />
+            <Eye aria-hidden="true" size={21} />
             观战中 · 暗牌仅显示数量
           </div>
         ) : (
@@ -394,7 +401,13 @@ function CardBack({ compact = false }: { readonly compact?: boolean }) {
   );
 }
 
-function OutcomePanel({ view }: { readonly view: DoudizhuView }) {
+function OutcomePanel({
+  view,
+  seats,
+}: {
+  readonly view: DoudizhuView;
+  readonly seats: readonly GameSeatPresentationV1[];
+}) {
   const outcome = view.outcome;
   if (!outcome) return null;
   return (
@@ -411,7 +424,7 @@ function OutcomePanel({ view }: { readonly view: DoudizhuView }) {
       <ul>
         {outcome.scores.map((entry) => (
           <li key={entry.seatId}>
-            <span>{seatLabel(view, entry.seatId)}</span>
+            <span>{seatDisplayName(view, entry.seatId, seats)}</span>
             <b className={entry.score > 0 ? "is-positive" : "is-negative"}>
               {entry.score > 0 ? "+" : ""}
               {entry.score}
@@ -423,10 +436,12 @@ function OutcomePanel({ view }: { readonly view: DoudizhuView }) {
   );
 }
 
-function statusText(view: DoudizhuView): string {
+function statusText(view: DoudizhuView, seats: readonly GameSeatPresentationV1[]): string {
   if (view.outcome) return view.outcome.winnerSide === "landlord" ? "地主拿下本局" : "农民合作获胜";
   if (view.activeSeatId === view.viewerSeatId) return "轮到你了";
-  if (view.activeSeatId !== null) return `等待${seatLabel(view, view.activeSeatId)}操作`;
+  if (view.activeSeatId !== null) {
+    return `等待 ${seatDisplayName(view, view.activeSeatId, seats)} 操作`;
+  }
   return "牌局已结束";
 }
 
@@ -445,6 +460,16 @@ function seatLabel(view: DoudizhuView, seatId: string): string {
     return (seatIndex - viewerIndex + 3) % 3 === 1 ? "下家" : "上家";
   }
   return `座位 ${seatIndex + 1}`;
+}
+
+function seatDisplayName(
+  view: DoudizhuView,
+  seatId: string,
+  seats: readonly GameSeatPresentationV1[],
+): string {
+  return (
+    seats.find((seat) => seat.seatId === seatId)?.occupant?.displayName ?? seatLabel(view, seatId)
+  );
 }
 
 function seatPositions(

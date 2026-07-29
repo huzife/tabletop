@@ -1,10 +1,10 @@
 .doudizhu-game {
-  --ddz-gold: #e4bd67;
   --ddz-ink: #17251f;
   background:
-    linear-gradient(180deg, rgba(6, 22, 17, 0.12), rgba(3, 14, 10, 0.48)),
+    linear-gradient(180deg, rgba(255, 253, 246, 0.62), rgba(232, 241, 234, 0.42)),
     url("./assets/table-background.webp") center / cover;
-  color: #f9f5e9;
+  color: var(--ddz-ink);
+  container-type: inline-size;
   font-family: Inter, "Noto Sans SC", "Microsoft YaHei", sans-serif;
   height: 100%;
   min-height: 0;
@@ -14,10 +14,10 @@
 }
 
 .doudizhu-game::after {
-  border: 1px solid rgba(229, 192, 109, 0.34);
-  border-radius: 28px;
+  border: 1px solid rgba(74, 112, 91, 0.2);
+  border-radius: 32px;
   content: "";
-  inset: 72px 42px 98px;
+  inset: 84px 44px 118px;
   pointer-events: none;
   position: absolute;
 }
@@ -33,23 +33,24 @@
 }
 
 .doudizhu-game__ambient {
-  background: radial-gradient(circle, rgba(223, 187, 105, 0.12) 0 1px, transparent 1.5px);
-  background-size: 19px 19px;
+  background: radial-gradient(circle, rgba(76, 117, 94, 0.08) 0 1px, transparent 1.5px);
+  background-size: 24px 24px;
   inset: 0;
-  opacity: 0.22;
+  opacity: 0.12;
   pointer-events: none;
   position: absolute;
 }
 
 .doudizhu-topbar {
   align-items: center;
-  background: linear-gradient(180deg, rgba(7, 24, 18, 0.96), rgba(9, 32, 24, 0.78));
-  border-bottom: 1px solid rgba(229, 192, 109, 0.28);
+  background: linear-gradient(180deg, rgba(255, 254, 249, 0.96), rgba(243, 248, 242, 0.9));
+  border-bottom: 1px solid rgba(66, 101, 82, 0.22);
+  box-shadow: 0 5px 18px rgba(49, 73, 59, 0.09);
   display: grid;
   grid-template-columns: 1fr auto 1fr;
-  height: 62px;
+  height: 72px;
   inset: 0 0 auto;
-  padding: 0 20px;
+  padding: 0 24px;
   position: absolute;
   z-index: 10;
 }
@@ -57,7 +58,7 @@
 .doudizhu-brand {
   align-items: center;
   display: flex;
-  gap: 10px;
+  gap: 12px;
 }
 
 .doudizhu-brand__seal {
@@ -69,10 +70,10 @@
   color: #fff5d8;
   display: flex;
   font-family: "Noto Serif SC", serif;
-  font-size: 22px;
-  height: 38px;
+  font-size: 26px;
+  height: 46px;
   justify-content: center;
-  width: 38px;
+  width: 46px;
 }
 
 .doudizhu-brand div,
@@ -83,26 +84,26 @@
 
 .doudizhu-brand strong {
   font-family: "Noto Serif SC", serif;
-  font-size: 15px;
+  font-size: 18px;
 }
 
 .doudizhu-brand span,
 .doudizhu-multiplier span,
 .doudizhu-multiplier small {
-  color: rgba(255, 255, 255, 0.66);
-  font-size: 10px;
+  color: #68766e;
+  font-size: 12px;
 }
 
 .doudizhu-multiplier {
   align-items: center;
   line-height: 1.05;
-  min-width: 150px;
+  min-width: 180px;
 }
 
 .doudizhu-multiplier strong {
-  color: #f5ce77;
+  color: #9b6421;
   font-family: Georgia, serif;
-  font-size: 23px;
+  font-size: 29px;
   letter-spacing: -0.03em;
   margin: 2px 0;
 }
@@ -110,30 +111,30 @@
 .doudizhu-connection {
   align-items: center;
   display: flex;
-  font-size: 11px;
-  gap: 6px;
+  font-size: 13px;
+  gap: 7px;
   justify-self: end;
 }
 
 .doudizhu-connection.is-connected {
-  color: #9ee4c2;
+  color: #277455;
 }
 
 .doudizhu-connection.is-reconnecting {
-  color: #f0c76b;
+  color: #9b6a16;
 }
 
 .doudizhu-connection.is-offline {
-  color: #f4a39d;
+  color: #a9443d;
 }
 
 .doudizhu-bottom-cards {
   display: flex;
-  gap: 5px;
+  gap: 8px;
   justify-content: center;
   left: 50%;
   position: absolute;
-  top: 70px;
+  top: 82px;
   transform: translateX(-50%);
   z-index: 5;
 }
@@ -141,31 +142,31 @@
 .doudizhu-seat {
   align-items: center;
   display: flex;
-  gap: 8px;
+  gap: 10px;
   position: absolute;
   z-index: 5;
 }
 
 .doudizhu-seat--left {
-  left: 18px;
-  top: 24%;
+  left: 22px;
+  top: 25%;
 }
 
 .doudizhu-seat--right {
   flex-direction: row-reverse;
-  right: 18px;
-  top: 24%;
+  right: 22px;
+  top: 25%;
 }
 
 .doudizhu-seat--top {
   left: 50%;
-  top: 118px;
+  top: 136px;
   transform: translateX(-50%);
 }
 
 .doudizhu-seat--bottom {
-  bottom: 135px;
-  left: 18px;
+  bottom: 158px;
+  left: 22px;
 }
 
 .doudizhu-seat__avatar {
@@ -177,11 +178,11 @@
   color: #f8d98d;
   display: flex;
   flex: 0 0 auto;
-  font-size: 16px;
+  font-size: 19px;
   font-weight: 800;
-  height: 42px;
+  height: 52px;
   justify-content: center;
-  width: 42px;
+  width: 52px;
 }
 
 .doudizhu-seat.is-current .doudizhu-seat__avatar {
@@ -193,11 +194,12 @@
 .doudizhu-seat__meta {
   background: rgba(5, 25, 18, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
-  min-width: 78px;
-  padding: 6px 8px;
+  max-width: 156px;
+  min-width: 108px;
+  padding: 9px 11px;
 }
 
 .doudizhu-seat--right .doudizhu-seat__meta {
@@ -205,17 +207,22 @@
 }
 
 .doudizhu-seat__meta strong {
-  font-size: 12px;
+  color: #fffdf5;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .doudizhu-seat__meta span {
   color: rgba(255, 255, 255, 0.7);
-  font-size: 10px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .doudizhu-seat__meta em {
-  color: var(--ddz-gold);
-  font-size: 9px;
+  color: #efca7c;
+  font-size: 11px;
   font-style: normal;
   font-weight: 700;
 }
@@ -231,32 +238,36 @@
   border-radius: 50%;
   color: white;
   display: flex;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
-  height: 22px;
+  height: 28px;
   justify-content: center;
   position: absolute;
-  right: -8px;
-  top: -7px;
-  width: 22px;
+  right: -10px;
+  top: -9px;
+  width: 28px;
 }
 
 .doudizhu-revealed-hand {
-  display: flex;
-  margin-left: 2px;
-  max-width: 220px;
+  background: rgba(255, 254, 248, 0.82);
+  border: 1px solid rgba(70, 102, 84, 0.2);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(43, 67, 53, 0.12);
+  display: grid;
+  gap: 6px 0;
+  grid-auto-rows: 66px;
+  grid-template-columns: repeat(10, 31px);
+  margin-left: 6px;
+  padding: 8px 14px 8px 8px;
 }
 
 .doudizhu-revealed-hand .doudizhu-card {
-  margin-left: -28px;
-}
-
-.doudizhu-revealed-hand .doudizhu-card:first-child {
-  margin-left: 0;
+  margin: 0;
 }
 
 .doudizhu-seat--right .doudizhu-revealed-hand {
-  flex-direction: row-reverse;
+  margin-left: 0;
+  margin-right: 6px;
 }
 
 .doudizhu-trick {
@@ -264,12 +275,12 @@
   display: flex;
   flex-direction: column;
   left: 50%;
-  min-height: 145px;
+  min-height: 168px;
   position: absolute;
   text-align: center;
-  top: 45%;
+  top: 46%;
   transform: translate(-50%, -50%);
-  width: min(58%, 520px);
+  width: min(64%, 680px);
   z-index: 4;
 }
 
@@ -278,24 +289,24 @@
   border: 1px solid rgba(233, 203, 134, 0.22);
   border-radius: 999px;
   color: #f4ddb0;
-  font-size: 11px;
-  margin: 0 0 12px;
-  padding: 5px 13px;
+  font-size: 14px;
+  margin: 0 0 14px;
+  padding: 8px 18px;
 }
 
 .doudizhu-empty-trick {
-  color: rgba(255, 255, 255, 0.54);
+  color: rgba(32, 55, 43, 0.62);
   font-family: "Noto Serif SC", serif;
-  font-size: 15px;
+  font-size: 19px;
   letter-spacing: 0.16em;
   padding: 26px;
 }
 
 .doudizhu-trick__label {
-  color: rgba(255, 255, 255, 0.75);
+  color: rgba(31, 54, 42, 0.78);
   display: block;
-  font-size: 10px;
-  margin-bottom: 6px;
+  font-size: 13px;
+  margin-bottom: 8px;
 }
 
 .doudizhu-trick__cards {
@@ -305,7 +316,7 @@
 
 .doudizhu-trick__cards .doudizhu-card {
   animation: doudizhu-play-in 220ms ease-out both;
-  margin-left: -17px;
+  margin-left: -15px;
 }
 
 .doudizhu-trick__cards .doudizhu-card:first-child {
@@ -313,19 +324,19 @@
 }
 
 .doudizhu-passes {
-  color: #eccd8a;
-  font-size: 10px;
-  margin: 8px 0 0;
+  color: #8c5d1f;
+  font-size: 13px;
+  margin: 10px 0 0;
 }
 
 .doudizhu-controls {
   align-items: center;
-  bottom: 103px;
+  bottom: 126px;
   display: flex;
-  gap: 8px;
+  gap: 10px;
   justify-content: center;
   left: 50%;
-  min-height: 34px;
+  min-height: 46px;
   position: absolute;
   transform: translateX(-50%);
   z-index: 9;
@@ -333,17 +344,20 @@
 
 .doudizhu-controls button {
   box-shadow: 0 5px 14px rgba(0, 0, 0, 0.2);
-  min-width: 78px;
+  font-size: 15px;
+  min-height: 44px;
+  min-width: 98px;
+  padding: 10px 18px;
 }
 
 .doudizhu-hand {
   align-items: flex-end;
-  bottom: 10px;
+  bottom: 12px;
   display: flex;
-  height: 88px;
+  height: 108px;
   justify-content: center;
   left: 50%;
-  max-width: calc(100% - 80px);
+  max-width: calc(100% - 28px);
   position: absolute;
   transform: translateX(-50%);
   width: 100%;
@@ -352,7 +366,7 @@
 
 .doudizhu-hand .doudizhu-card {
   animation: doudizhu-deal-in 260ms ease-out both;
-  margin-left: clamp(-38px, -2.3vw, -25px);
+  margin-left: clamp(-40px, calc((100cqw - 1320px) / 19), -16px);
 }
 
 .doudizhu-hand .doudizhu-card:first-child {
@@ -363,19 +377,19 @@
 .doudizhu-card-back {
   background: #fffdf7;
   border: 1px solid rgba(19, 24, 21, 0.28);
-  border-radius: 6px;
+  border-radius: 8px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
   box-sizing: border-box;
   color: #18201d;
   display: inline-flex;
   flex: 0 0 auto;
-  height: 82px;
+  height: 96px;
   overflow: hidden;
   position: relative;
   transition:
     transform 140ms ease,
     box-shadow 140ms ease;
-  width: 56px;
+  width: 66px;
 }
 
 button.doudizhu-card {
@@ -393,7 +407,7 @@ button.doudizhu-card:disabled {
   box-shadow:
     0 0 0 2px #f1c664,
     0 7px 13px rgba(0, 0, 0, 0.34);
-  transform: translateY(-17px);
+  transform: translateY(-21px);
 }
 
 .doudizhu-card.is-red {
@@ -402,41 +416,41 @@ button.doudizhu-card:disabled {
 
 .doudizhu-card__rank {
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 800;
-  left: 5px;
+  left: 6px;
   line-height: 1;
   position: absolute;
-  top: 5px;
+  top: 6px;
 }
 
 .doudizhu-card__suit {
-  font-size: 14px;
-  left: 6px;
+  font-size: 18px;
+  left: 7px;
   position: absolute;
-  top: 22px;
+  top: 28px;
 }
 
 .doudizhu-card__center {
   bottom: 5px;
-  font-size: 25px;
+  font-size: 31px;
   position: absolute;
   right: 6px;
 }
 
 .doudizhu-card.is-joker .doudizhu-card__rank {
   font-family: "Noto Serif SC", serif;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.08;
   text-align: center;
   top: 8px;
-  width: 16px;
+  width: 19px;
   word-break: break-all;
 }
 
 .doudizhu-card.is-joker .doudizhu-card__suit {
   bottom: 7px;
-  font-size: 22px;
+  font-size: 27px;
   left: auto;
   right: 7px;
   top: auto;
@@ -444,25 +458,25 @@ button.doudizhu-card:disabled {
 
 .doudizhu-card.is-compact,
 .doudizhu-card-back.is-compact {
-  border-radius: 4px;
-  height: 52px;
-  width: 36px;
+  border-radius: 5px;
+  height: 66px;
+  width: 46px;
 }
 
 .doudizhu-card.is-compact .doudizhu-card__rank {
-  font-size: 11px;
+  font-size: 14px;
   left: 4px;
   top: 4px;
 }
 
 .doudizhu-card.is-compact .doudizhu-card__suit {
-  font-size: 10px;
+  font-size: 12px;
   left: 4px;
-  top: 17px;
+  top: 21px;
 }
 
 .doudizhu-card.is-compact.is-joker .doudizhu-card__rank {
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .doudizhu-card-back {
@@ -479,35 +493,36 @@ button.doudizhu-card:disabled {
   border-radius: 999px;
   color: rgba(255, 255, 255, 0.72);
   display: flex;
-  font-size: 11px;
-  gap: 7px;
-  padding: 8px 14px;
+  font-size: 14px;
+  gap: 9px;
+  padding: 11px 18px;
 }
 
 .doudizhu-outcome {
   background: rgba(8, 24, 18, 0.96);
   border: 1px solid rgba(237, 199, 112, 0.65);
-  border-radius: 14px;
+  border-radius: 18px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.48);
+  color: #fffdf5;
   left: 50%;
-  padding: 18px 22px;
+  padding: 24px 28px;
   position: absolute;
   text-align: center;
   top: 46%;
   transform: translate(-50%, -50%);
-  width: 270px;
+  width: 330px;
   z-index: 20;
 }
 
 .doudizhu-outcome__eyebrow {
   color: #e6c373;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.12em;
 }
 
 .doudizhu-outcome h2 {
   font-family: "Noto Serif SC", serif;
-  font-size: 22px;
+  font-size: 28px;
   margin: 4px 0;
 }
 
@@ -524,7 +539,7 @@ button.doudizhu-card:disabled {
 
 .doudizhu-outcome li {
   display: flex;
-  font-size: 12px;
+  font-size: 15px;
   justify-content: space-between;
   padding: 3px 2px;
 }
@@ -577,20 +592,33 @@ button.doudizhu-card:disabled {
   }
 
   .doudizhu-seat--bottom {
-    bottom: 122px;
+    bottom: 140px;
   }
 
   .doudizhu-controls {
-    bottom: 94px;
+    bottom: 109px;
   }
 
   .doudizhu-hand {
-    bottom: 5px;
-    height: 82px;
+    bottom: 7px;
+    height: 94px;
+  }
+
+  .doudizhu-revealed-hand {
+    gap: 5px 0;
+    grid-auto-rows: 60px;
+    grid-template-columns: repeat(10, 27px);
+    padding: 7px 13px 7px 7px;
+  }
+
+  .doudizhu-card.is-compact,
+  .doudizhu-card-back.is-compact {
+    height: 60px;
+    width: 42px;
   }
 
   .doudizhu-card {
-    height: 74px;
-    width: 51px;
+    height: 84px;
+    width: 58px;
   }
 }

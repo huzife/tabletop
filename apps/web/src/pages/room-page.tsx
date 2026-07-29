@@ -670,6 +670,7 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
                 displayEvents={payload.displayEvents}
                 key={snapshot.matchId ?? "no-match"}
                 readOnly={!payload.permissions.canSubmitGameAction || commandBusy || !connected}
+                seats={payload.seats}
                 transientEvent={socket.transientEvent}
                 view={payload.gameView}
               />
