@@ -8,6 +8,7 @@ import {
   memberIdSchema,
   roomIdSchema,
   sessionIdSchema,
+  type AccountId,
   type JsonValue,
   type MemberId,
   type RoomId,
@@ -60,11 +61,11 @@ export class RoomRegistry {
   readonly #inviteRooms = new Map<string, RoomId>();
   readonly #joinTicketTimers = new Map<string, NodeJS.Timeout>();
   readonly #joinTickets = new Map<string, JoinTicketState>();
-  readonly #membersBySession = new Map<SessionId, Map<RoomId, MemberId>>();
+  readonly #memberByAccount = new Map<AccountId, { memberId: MemberId; roomId: RoomId }>();
+  readonly #accountMutex = new KeyedMutex<AccountId>();
   readonly #passwords: RoomPasswordService;
   readonly #repositories: TabletopRepositories;
   readonly #rooms = new Map<RoomId, RoomRuntime>();
-  readonly #sessionMutex = new KeyedMutex<SessionId>();
   #publisher: RoomPublisher = noOpPublisher;
 
   constructor(options: {
@@ -103,24 +104,22 @@ export class RoomRegistry {
     return this.#repositories.services.initializeSite();
   }
 
-  listPublicRooms(sessionIdInput?: string) {
-    const sessionId =
-      sessionIdInput === undefined ? undefined : sessionIdSchema.parse(sessionIdInput);
+  listPublicRooms(accountIdInput?: string) {
+    const accountId =
+      accountIdInput === undefined ? undefined : accountIdSchema.parse(accountIdInput);
+    const currentRoom = accountId === undefined ? undefined : this.currentRoomForAccount(accountId);
     return [...this.#rooms.values()].flatMap((room) => {
       if (room.destroyed) return [];
-      const binding =
-        sessionId === undefined ? undefined : this.bindingForSession(sessionId, room.state.roomId);
-      if (room.state.practice && binding === undefined) return [];
+      if (room.state.practice && currentRoom?.roomId !== room.state.roomId) return [];
       const host = room.state.members.get(room.state.hostMemberId);
-      const resumeAvailable = binding !== undefined;
-      const normallyJoinable =
+      const joinable =
         room.state.status !== "playing" || room.state.game.manifest.capabilities.midgameJoin;
       return [
         {
           gameId: room.state.gameId,
           hasPassword: room.state.passwordHash !== undefined,
           hostName: host?.displayName ?? "房主",
-          joinable: resumeAvailable || normallyJoinable,
+          joinable,
           maxPlayers: room.state.seats.length,
           maxSpectators: 10,
           name: room.state.name,
@@ -129,11 +128,29 @@ export class RoomRegistry {
           spectatorCount: [...room.state.members.values()].filter(
             (member) => member.role === "spectator",
           ).length,
-          resumeAvailable,
           status: room.state.status,
         },
       ];
     });
+  }
+
+  currentRoomForAccount(accountIdInput: string) {
+    const accountId = accountIdSchema.parse(accountIdInput);
+    const binding = this.#memberByAccount.get(accountId);
+    if (binding && this.#validateAccountBinding(accountId, binding.roomId, binding.memberId)) {
+      return binding;
+    }
+    for (const room of this.#rooms.values()) {
+      if (room.destroyed) continue;
+      const member = [...room.state.members.values()].find(
+        (candidate) => candidate.accountId === accountId,
+      );
+      if (!member) continue;
+      const recovered = { memberId: member.memberId, roomId: room.state.roomId };
+      this.#memberByAccount.set(accountId, recovered);
+      return recovered;
+    }
+    return undefined;
   }
 
   async createRoom(input: CreateRoomInput) {
@@ -141,7 +158,9 @@ export class RoomRegistry {
     const gameId = gameIdSchema.parse(input.gameId);
     this.#ensureGameEnabled(gameId);
     const sessionId = sessionIdSchema.parse(input.session.id);
+    const accountId = accountIdSchema.parse(input.account.id);
     this.#ensureSessionActive(input.session, input.account.id);
+    this.#ensureAccountHasNoRoom(accountId);
     const game = this.#games.require(gameId);
     const settings = game.parseSettings(input.settings);
     const name = normalizeRoomName(input.name);
@@ -155,20 +174,20 @@ export class RoomRegistry {
       throw new HttpError(499, "INTERNAL_ROOM_ABORTED", "建房请求已经取消");
     }
 
-    return this.#sessionMutex.run(sessionId, async () => {
+    return this.#accountMutex.run(accountId, async () => {
       this.#ensureSiteEnabled();
       this.#ensureGameEnabled(gameId);
       this.#ensureSessionActive(input.session, input.account.id);
+      this.#ensureAccountHasNoRoom(accountId);
       if (input.isCancelled?.()) {
         throw new HttpError(499, "INTERNAL_ROOM_ABORTED", "建房请求已经取消");
       }
       const roomId = roomIdSchema.parse(`room-${ulid()}`);
       const memberId = memberIdSchema.parse(`member-${ulid()}`);
-      const accountId = accountIdSchema.parse(input.account.id);
       const inviteToken = randomBytes(24).toString("base64url");
       const member: RoomMemberState = {
         accountId,
-        connectionStatus: "offline",
+        connectionStatus: "connected",
         displayName: input.account.username,
         joinedAt: Date.now(),
         memberId,
@@ -266,7 +285,7 @@ export class RoomRegistry {
       );
       this.#rooms.set(roomId, runtime);
       this.#inviteRooms.set(inviteToken, roomId);
-      this.#setMemberBinding(sessionId, roomId, memberId);
+      this.#setAccountBinding(accountId, roomId, memberId);
       const ticket = this.#createJoinTicket({
         memberId,
         roomId,
@@ -286,8 +305,9 @@ export class RoomRegistry {
     this.#ensureSiteEnabled();
     this.#ensureGameEnabled(gameIdSchema.parse(room.state.gameId));
     const sessionId = sessionIdSchema.parse(options.session.id);
+    const accountId = accountIdSchema.parse(options.session.accountId);
     this.#ensureSessionActive(options.session);
-    this.#ensureRoomAvailableForSession(sessionId, room.state.roomId);
+    this.#ensureAccountHasNoRoom(accountId);
     if (room.state.passwordHash) {
       let verified = false;
       try {
@@ -306,7 +326,7 @@ export class RoomRegistry {
     const currentRoom = this.require(room.state.roomId);
     this.#ensureGameEnabled(gameIdSchema.parse(currentRoom.state.gameId));
     this.#ensureSessionActive(options.session);
-    this.#ensureRoomAvailableForSession(sessionId, currentRoom.state.roomId);
+    this.#ensureAccountHasNoRoom(accountId);
     return this.#createJoinTicket({
       roomId: currentRoom.state.roomId,
       sessionId,
@@ -323,8 +343,9 @@ export class RoomRegistry {
     this.#ensureSiteEnabled();
     this.#ensureGameEnabled(gameIdSchema.parse(room.state.gameId));
     const sessionId = sessionIdSchema.parse(options.session.id);
+    const accountId = accountIdSchema.parse(options.session.accountId);
     this.#ensureSessionActive(options.session);
-    this.#ensureRoomAvailableForSession(sessionId, roomId);
+    this.#ensureAccountHasNoRoom(accountId);
     return this.#createJoinTicket({ roomId, sessionId, source: "invite" });
   }
 
@@ -335,6 +356,7 @@ export class RoomRegistry {
   ): Promise<{ member: RoomMemberState; room: RoomRuntime }> {
     const ticket = this.#joinTickets.get(token);
     const sessionId = sessionIdSchema.parse(session.id);
+    const accountId = accountIdSchema.parse(account.id);
     if (!ticket || ticket.sessionId !== sessionId) {
       throw new HttpError(403, "ROOM_PERMISSION_DENIED", "加入凭据无效或已经过期");
     }
@@ -344,28 +366,26 @@ export class RoomRegistry {
     }
     this.#deleteJoinTicket(token);
 
-    return this.#sessionMutex.run(sessionId, async () => {
+    return this.#accountMutex.run(accountId, async () => {
       this.#ensureSiteEnabled();
       this.#ensureSessionActive(session, account.id);
       const room = this.require(ticket.roomId);
       this.#ensureGameEnabled(gameIdSchema.parse(room.state.gameId));
-      const existingBinding = this.bindingForSession(sessionId, ticket.roomId);
+      const existingBinding = this.currentRoomForAccount(accountId);
       if (
         existingBinding &&
-        (ticket.memberId === undefined || existingBinding.memberId !== ticket.memberId)
+        (ticket.memberId === undefined ||
+          existingBinding.roomId !== ticket.roomId ||
+          existingBinding.memberId !== ticket.memberId)
       ) {
-        throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前设备已经加入该房间");
+        this.#throwAccountRoomConflict(existingBinding.roomId);
       }
       let member = ticket.memberId ? room.state.members.get(ticket.memberId) : undefined;
-      member ??= [...room.state.members.values()].find(
-        (candidate) =>
-          candidate.sessionId === sessionId && candidate.connectionStatus === "offline",
-      );
       if (!member) {
         const memberId = memberIdSchema.parse(`member-${ulid()}`);
         member = {
-          accountId: accountIdSchema.parse(account.id),
-          connectionStatus: "offline",
+          accountId,
+          connectionStatus: "connected",
           displayName: account.username,
           joinedAt: Date.now(),
           memberId,
@@ -374,27 +394,9 @@ export class RoomRegistry {
         };
         await room.addMember(member);
       }
-      this.#setMemberBinding(sessionId, room.state.roomId, member.memberId);
+      this.#setAccountBinding(accountId, room.state.roomId, member.memberId);
       return { member, room };
     });
-  }
-
-  bindingForSession(sessionIdInput: string, roomIdInput?: string | RoomId) {
-    const sessionId = sessionIdSchema.parse(sessionIdInput);
-    const bindings = this.#membersBySession.get(sessionId);
-    if (!bindings) return undefined;
-    if (roomIdInput !== undefined) {
-      const roomId = roomIdSchema.parse(roomIdInput);
-      const memberId = bindings.get(roomId);
-      if (memberId === undefined) return undefined;
-      return this.#validateBinding(sessionId, roomId, memberId) ? { memberId, roomId } : undefined;
-    }
-    for (const [roomId, memberId] of [...bindings]) {
-      if (this.#validateBinding(sessionId, roomId, memberId)) {
-        return { memberId, roomId };
-      }
-    }
-    return undefined;
   }
 
   confirmMemberAttached(memberId: MemberId): void {
@@ -415,40 +417,25 @@ export class RoomRegistry {
   }
 
   hasAccountMembership(accountId: string): boolean {
-    return [...this.#rooms.values()].some((room) =>
-      [...room.state.members.values()].some((member) => member.accountId === accountId),
-    );
+    return this.currentRoomForAccount(accountId) !== undefined;
   }
 
   isAccountOnline(accountId: string): boolean {
-    return [...this.#rooms.values()].some((room) =>
-      [...room.state.members.values()].some(
-        (member) => member.accountId === accountId && member.connectionStatus === "connected",
-      ),
-    );
+    const binding = this.currentRoomForAccount(accountId);
+    const member =
+      binding === undefined
+        ? undefined
+        : this.#rooms.get(binding.roomId)?.state.members.get(binding.memberId);
+    return member?.connectionStatus === "connected" && member.connectionId !== undefined;
   }
 
   async removeAccount(accountId: string): Promise<void> {
-    const removals: Promise<void>[] = [];
-    for (const room of [...this.#rooms.values()]) {
-      const memberIds = [...room.state.members.values()]
-        .filter((member) => member.accountId === accountId)
-        .map((member) => member.memberId);
-      for (const memberId of memberIds) {
-        this.#publisher.disconnectMember(memberId, 4004, "账号已被管理员禁用");
-      }
-      if (memberIds.length > 0) {
-        removals.push(
-          (async () => {
-            for (const memberId of memberIds) {
-              if (room.destroyed || !room.state.members.has(memberId)) continue;
-              await room.leave(memberId);
-            }
-          })(),
-        );
-      }
-    }
-    await Promise.all(removals);
+    const binding = this.currentRoomForAccount(accountId);
+    if (!binding) return;
+    const room = this.#rooms.get(binding.roomId);
+    if (!room || room.destroyed || !room.state.members.has(binding.memberId)) return;
+    this.#publisher.disconnectMember(binding.memberId, 4004, "账号已被管理员禁用");
+    await room.leave(binding.memberId);
   }
 
   closeAll(reason = "site_disabled", message = "网站服务已关闭"): void {
@@ -488,12 +475,7 @@ export class RoomRegistry {
     if (ticket.source !== "create" || ticket.memberId === undefined) return;
     const room = this.#rooms.get(ticket.roomId);
     const member = room?.state.members.get(ticket.memberId);
-    if (
-      room &&
-      !room.destroyed &&
-      member?.connectionStatus === "offline" &&
-      member.connectionId === undefined
-    ) {
+    if (room && !room.destroyed && member !== undefined && member.connectionId === undefined) {
       void room
         .leave(member.memberId)
         .catch(() => room.destroy("internal_error", "清理未连接的创建者失败"));
@@ -529,23 +511,24 @@ export class RoomRegistry {
     }
   }
 
-  #ensureRoomAvailableForSession(sessionId: SessionId, roomId: RoomId): void {
-    if (this.bindingForSession(sessionId, roomId)) {
-      throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前设备已经加入该房间", {
-        resumeAvailable: true,
-        roomId,
-      });
-    }
+  #ensureAccountHasNoRoom(accountId: AccountId): void {
+    const binding = this.currentRoomForAccount(accountId);
+    if (binding) this.#throwAccountRoomConflict(binding.roomId);
   }
 
-  #validateBinding(sessionId: SessionId, roomId: RoomId, memberId: MemberId): boolean {
+  #throwAccountRoomConflict(currentRoomId: RoomId): never {
+    throw new HttpError(409, "CONNECTION_ROOM_CONFLICT", "当前账号已经进入一个房间", {
+      currentRoomId,
+    });
+  }
+
+  #validateAccountBinding(accountId: AccountId, roomId: RoomId, memberId: MemberId): boolean {
     const room = this.#rooms.get(roomId);
     const member = room?.destroyed ? undefined : room?.state.members.get(memberId);
-    if (member?.sessionId === sessionId) return true;
-    const bindings = this.#membersBySession.get(sessionId);
-    if (bindings?.get(roomId) === memberId) {
-      bindings.delete(roomId);
-      if (bindings.size === 0) this.#membersBySession.delete(sessionId);
+    if (member?.accountId === accountId) return true;
+    const binding = this.#memberByAccount.get(accountId);
+    if (binding?.roomId === roomId && binding.memberId === memberId) {
+      this.#memberByAccount.delete(accountId);
     }
     return false;
   }
@@ -568,21 +551,14 @@ export class RoomRegistry {
     };
   }
 
-  #setMemberBinding(sessionId: SessionId, roomId: RoomId, memberId: MemberId): void {
-    let bindings = this.#membersBySession.get(sessionId);
-    if (!bindings) {
-      bindings = new Map();
-      this.#membersBySession.set(sessionId, bindings);
-    }
-    bindings.set(roomId, memberId);
+  #setAccountBinding(accountId: AccountId, roomId: RoomId, memberId: MemberId): void {
+    this.#memberByAccount.set(accountId, { memberId, roomId });
   }
 
   #releaseMemberBinding(roomId: RoomId, member: RoomMemberState): void {
-    const bindings = this.#membersBySession.get(member.sessionId);
-    if (bindings?.get(roomId) !== member.memberId) return;
-    bindings.delete(roomId);
-    if (bindings.size === 0) {
-      this.#membersBySession.delete(member.sessionId);
+    const binding = this.#memberByAccount.get(member.accountId);
+    if (binding?.roomId === roomId && binding.memberId === member.memberId) {
+      this.#memberByAccount.delete(member.accountId);
     }
   }
 

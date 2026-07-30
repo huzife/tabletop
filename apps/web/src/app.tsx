@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
-import { Navigate, Outlet, useParams, type RouteObject } from "react-router";
+import { roomIdSchema } from "@tabletop/protocol";
+import { useEffect, useRef, useState } from "react";
+import { Navigate, Outlet, useNavigate, useParams, type RouteObject } from "react-router";
 import { AuthProvider, RequireAdmin, RequireAnonymous, RequireSession } from "./auth";
 import { AppShell } from "./components/app-shell";
 import { ApiClientError } from "./api/client";
@@ -51,6 +52,13 @@ function InviteResolver() {
     );
   }
   if (ticketQuery.isError) {
+    const currentRoomId =
+      ticketQuery.error instanceof ApiClientError
+        ? roomIdSchema.safeParse(ticketQuery.error.details.currentRoomId)
+        : undefined;
+    if (currentRoomId?.success) {
+      return <CurrentRoomRedirectPrompt currentRoomId={currentRoomId.data} />;
+    }
     return (
       <main className="page page--centered">
         <div className="warning-notice" role="alert">
@@ -70,6 +78,27 @@ function InviteResolver() {
       }}
       to={`/rooms/${ticketQuery.data.roomId}`}
     />
+  );
+}
+
+function CurrentRoomRedirectPrompt({ currentRoomId }: { readonly currentRoomId: string }) {
+  const navigate = useNavigate();
+  const prompted = useRef(false);
+
+  useEffect(() => {
+    if (prompted.current) return;
+    prompted.current = true;
+    if (window.confirm("当前账号已经在一个房间中，是否返回当前房间？")) {
+      void navigate(`/rooms/${currentRoomId}`, { replace: true });
+    }
+  }, [currentRoomId, navigate]);
+
+  return (
+    <main className="page page--centered">
+      <div className="warning-notice" role="alert">
+        当前账号已经在一个房间中，不能同时进入邀请房间。
+      </div>
+    </main>
   );
 }
 

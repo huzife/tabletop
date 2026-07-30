@@ -1,10 +1,13 @@
 import type { GameConnectionStateV1 } from "@tabletop/game-sdk/web";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   roomIdSchema,
   type JsonObject,
   type JsonValue,
+  type RequestId,
   type RoomMember,
   type RoomSeat,
+  type RoomStatus,
 } from "@tabletop/protocol";
 import { Badge, Button, IconButton } from "@tabletop/ui";
 import {
@@ -60,8 +63,7 @@ const CONNECTION_LABELS: Readonly<
 };
 
 const MEMBER_CONNECTION_LABELS = {
-  connected: "在线",
-  offline: "已离线",
+  connected: "正常",
   reconnecting: "等待重连",
 } as const;
 
@@ -70,6 +72,13 @@ const CONTROLLER_LABELS = {
   fallback: "临时接管",
   human: "真人",
 } as const;
+
+export function confirmManualRoomLeave(status: RoomStatus): boolean {
+  return (
+    status !== "playing" ||
+    window.confirm("对局正在进行。确定离开后将立即退出本局，且不能重连，是否继续？")
+  );
+}
 
 export function RoomPage() {
   const { roomId: roomIdInput = "" } = useParams();
@@ -81,12 +90,14 @@ export function RoomPage() {
 function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { session } = useAuth();
   const [entry] = useState<RoomEntryContext>(() => captureRoomEntryContext(roomId, location.state));
   const socket = useRoomSocket(roomId, entry.joinTicket);
   const gamesQuery = useGames();
   const [copied, setCopied] = useState(false);
   const [localNotice, setLocalNotice] = useState("");
+  const [leavingRequestId, setLeavingRequestId] = useState<RequestId>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [roomNameDraft, setRoomNameDraft] = useState("");
   const [settingsDraft, setSettingsDraft] = useState<JsonValue | null>(null);
@@ -118,12 +129,48 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
     setSettingsDraft(payload.settings);
   }, [payload, settingsOpen]);
 
+  useEffect(() => {
+    if (payload?.room.roomId !== roomId) return;
+    void queryClient.invalidateQueries({ queryKey: ["rooms"] });
+  }, [payload?.room.roomId, queryClient, roomId]);
+
+  useEffect(
+    () => () => {
+      window.setTimeout(() => {
+        void queryClient.invalidateQueries({ queryKey: ["rooms"] });
+      }, 250);
+    },
+    [queryClient],
+  );
+
   useEffect(
     () => () => {
       if (copiedTimer.current !== undefined) window.clearTimeout(copiedTimer.current);
     },
     [],
   );
+
+  useEffect(() => {
+    if (leavingRequestId === undefined || socket.pendingRequestIds.includes(leavingRequestId)) {
+      return;
+    }
+    if (socket.error?.commandType === "room.leave") {
+      setLeavingRequestId(undefined);
+      setLocalNotice(socket.error.message);
+      return;
+    }
+    clearRoomEntryContext(roomId);
+    void queryClient.invalidateQueries({ queryKey: ["rooms"] });
+    void navigate(payload === undefined ? "/" : `/games/${payload.gameId}`);
+  }, [
+    leavingRequestId,
+    navigate,
+    payload,
+    queryClient,
+    roomId,
+    socket.error,
+    socket.pendingRequestIds,
+  ]);
 
   const currentMember = useMemo(
     () => payload?.members.find((member) => member.accountId === session?.accountId),
@@ -317,12 +364,13 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
   }
 
   function leaveRoom() {
-    clearRoomEntryContext(roomId);
-    if (connected) socket.sendCommand({ payload: {}, type: "room.leave" });
-    window.setTimeout(
-      () => navigate(payload === undefined ? "/" : `/games/${payload.gameId}`),
-      100,
-    );
+    if (payload !== undefined && !confirmManualRoomLeave(payload.room.status)) return;
+    const requestId = connected ? socket.sendCommand({ payload: {}, type: "room.leave" }) : null;
+    if (requestId === null) {
+      setLocalNotice("当前连接不可用，请先重新连接后再退出房间");
+      return;
+    }
+    setLeavingRequestId(requestId);
   }
 
   if (
@@ -436,6 +484,7 @@ function ConnectedRoomPage({ roomId }: { readonly roomId: string }) {
           <IconButton
             icon={<LogOut size={18} />}
             label="离开房间"
+            disabled={leavingRequestId !== undefined}
             onClick={leaveRoom}
             tone="danger"
           />

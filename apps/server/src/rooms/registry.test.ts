@@ -5,7 +5,13 @@ import {
   GameRuleError,
   registerServerGamesV1,
 } from "@tabletop/game-sdk/server";
-import { gameIdSchema, seatIdSchema, sessionIdSchema, type SeatId } from "@tabletop/protocol";
+import {
+  accountIdSchema,
+  gameIdSchema,
+  seatIdSchema,
+  sessionIdSchema,
+  type SeatId,
+} from "@tabletop/protocol";
 import { ulid } from "ulid";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -421,23 +427,22 @@ describe("RoomRegistry and RoomRuntime", () => {
     await expect(noop).resolves.toBe(false);
     expect(created.room.state.revision).toBe(revisionBeforeConcurrentCommands + 1);
     expect(snapshotCount).toBeGreaterThanOrEqual(8);
-    const sameSessionRoom = await registry.createRoom({
-      account: account1,
-      gameId: "test-room",
-      name: "同会话房间",
-      practice: false,
-      session: session1,
-      settings: {},
+    await expect(
+      registry.createRoom({
+        account: account1,
+        gameId: "test-room",
+        name: "账号第二房间",
+        practice: false,
+        session: session1,
+        settings: {},
+      }),
+    ).rejects.toMatchObject({
+      code: "CONNECTION_ROOM_CONFLICT",
+      details: { currentRoomId: created.room.state.roomId },
     });
-    expect(registry.bindingForSession(session1.id, created.room.state.roomId)).toMatchObject({
+    expect(registry.currentRoomForAccount(account1.id)).toMatchObject({
       memberId: hostJoin.member.memberId,
-    });
-    expect(
-      registry.bindingForSession(session1.id, sameSessionRoom.room.state.roomId),
-    ).toMatchObject({ memberId: sameSessionRoom.room.state.hostMemberId });
-    sameSessionRoom.room.destroy("host_closed", "测试结束");
-    expect(registry.bindingForSession(session1.id, created.room.state.roomId)).toMatchObject({
-      memberId: hostJoin.member.memberId,
+      roomId: created.room.state.roomId,
     });
 
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -450,17 +455,17 @@ describe("RoomRegistry and RoomRuntime", () => {
     await created.room.queue.run(() => undefined);
     expect(created.room.state.members.has(joined.member.memberId)).toBe(false);
     expect(created.room.state.seats.find(({ seatId }) => seatId === "seat-2")?.occupant).toBeNull();
-    expect(registry.bindingForSession(session2.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(account2.id)).toBeUndefined();
 
     created.room.destroy("host_closed", "测试结束");
   });
 
-  it("allows concurrent room creation for one session with independent bindings", async () => {
+  it("allows only one concurrent room creation for one account", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers);
     const account = accounts[0]!;
     const session = sessions[0]!;
 
-    const createdRooms = await Promise.all([
+    const results = await Promise.allSettled([
       registry.createRoom({
         account,
         gameId: "test-room",
@@ -479,21 +484,26 @@ describe("RoomRegistry and RoomRuntime", () => {
       }),
     ]);
 
-    expect(createdRooms).toHaveLength(2);
-    expect(new Set(createdRooms.map(({ room }) => room.state.roomId)).size).toBe(2);
-    expect(registry.listPublicRooms()).toHaveLength(2);
-    expect(registry.listPublicRooms().every((room) => !room.resumeAvailable)).toBe(true);
-    expect(registry.listPublicRooms(session.id).every((room) => room.resumeAvailable)).toBe(true);
-    for (const { room } of createdRooms) {
-      expect(registry.bindingForSession(session.id, room.state.roomId)).toEqual({
-        memberId: room.state.hostMemberId,
-        roomId: room.state.roomId,
-      });
-    }
-    createdRooms.forEach(({ room }) => room.destroy("host_closed", "测试结束"));
+    const created = results.find(
+      (result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof registry.createRoom>>> =>
+        result.status === "fulfilled",
+    );
+    expect(created).toBeDefined();
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(({ status }) => status === "rejected")).toEqual([
+      expect.objectContaining({
+        reason: expect.objectContaining({ code: "CONNECTION_ROOM_CONFLICT" }),
+      }),
+    ]);
+    expect(registry.listPublicRooms()).toHaveLength(1);
+    expect(registry.currentRoomForAccount(account.id)).toEqual({
+      memberId: created?.value.room.state.hostMemberId,
+      roomId: created?.value.room.state.roomId,
+    });
+    created?.value.room.destroy("host_closed", "测试结束");
   });
 
-  it("allows concurrent join ticket consumption for one session in different rooms", async () => {
+  it("allows only one concurrent join ticket consumption for one account", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers, { accountCount: 3 });
     const rooms = await Promise.all(
       [0, 1].map(async (index) => {
@@ -516,19 +526,26 @@ describe("RoomRegistry and RoomRuntime", () => {
       }),
     );
 
-    const joins = await Promise.all(
+    const results = await Promise.allSettled(
       tickets.map((ticket) => registry.consumeJoinTicket(ticket.token, accounts[2]!, sessions[2]!)),
     );
 
-    expect(joins).toHaveLength(2);
-    expect(new Set(joins.map(({ member }) => member.memberId)).size).toBe(2);
-    rooms.forEach((room, index) => {
-      const joined = joins[index]!;
-      expect(room.state.members.get(joined.member.memberId)).toBe(joined.member);
-      expect(registry.bindingForSession(sessions[2]!.id, room.state.roomId)).toEqual({
-        memberId: joined.member.memberId,
-        roomId: room.state.roomId,
-      });
+    expect(results.filter(({ status }) => status === "fulfilled")).toHaveLength(1);
+    expect(results.filter(({ status }) => status === "rejected")).toEqual([
+      expect.objectContaining({
+        reason: expect.objectContaining({ code: "CONNECTION_ROOM_CONFLICT" }),
+      }),
+    ]);
+    const joined = results.find(
+      (
+        result,
+      ): result is PromiseFulfilledResult<Awaited<ReturnType<typeof registry.consumeJoinTicket>>> =>
+        result.status === "fulfilled",
+    );
+    expect(joined).toBeDefined();
+    expect(registry.currentRoomForAccount(accounts[2]!.id)).toEqual({
+      memberId: joined?.value.member.memberId,
+      roomId: joined?.value.room.state.roomId,
     });
     rooms.forEach((room) => room.destroy("host_closed", "测试结束"));
   });
@@ -570,35 +587,38 @@ describe("RoomRegistry and RoomRuntime", () => {
         ({ sessionId }) => sessionId === sessions[1]!.id,
       ),
     ).toHaveLength(1);
-    expect(registry.bindingForSession(sessions[1]!.id, created.room.state.roomId)).toBeDefined();
+    expect(registry.currentRoomForAccount(accounts[1]!.id)).toBeDefined();
     created.room.destroy("host_closed", "测试结束");
   });
 
-  it("releases one room binding without affecting another binding for the same session", async () => {
+  it("releases the account current room before allowing another room", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers);
     const account = accounts[0]!;
     const session = sessions[0]!;
-    const [first, second] = await Promise.all(
-      ["待释放房间", "保留绑定房间"].map((name) =>
-        registry.createRoom({
-          account,
-          gameId: "test-room",
-          name,
-          practice: false,
-          session,
-          settings: {},
-        }),
-      ),
-    );
-    if (!first || !second) throw new Error("测试未创建两个同会话房间");
+    const first = await registry.createRoom({
+      account,
+      gameId: "test-room",
+      name: "待释放房间",
+      practice: false,
+      session,
+      settings: {},
+    });
     const firstJoin = await registry.consumeJoinTicket(first.ticket.token, account, session);
-    const secondJoin = await registry.consumeJoinTicket(second.ticket.token, account, session);
 
     await first.room.leave(firstJoin.member.memberId);
 
     expect(first.room.destroyed).toBe(true);
-    expect(registry.bindingForSession(session.id, first.room.state.roomId)).toBeUndefined();
-    expect(registry.bindingForSession(session.id, second.room.state.roomId)).toEqual({
+    expect(registry.currentRoomForAccount(account.id)).toBeUndefined();
+    const second = await registry.createRoom({
+      account,
+      gameId: "test-room",
+      name: "后续房间",
+      practice: false,
+      session,
+      settings: {},
+    });
+    const secondJoin = await registry.consumeJoinTicket(second.ticket.token, account, session);
+    expect(registry.currentRoomForAccount(account.id)).toEqual({
       memberId: secondJoin.member.memberId,
       roomId: second.room.state.roomId,
     });
@@ -623,7 +643,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     await vi.advanceTimersByTimeAsync(30_000);
 
     expect(abandoned.room.destroyed).toBe(true);
-    expect(registry.bindingForSession(session.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(account.id)).toBeUndefined();
     expect(() => registry.require(abandoned.room.state.roomId)).toThrowError(
       expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
     );
@@ -650,11 +670,12 @@ describe("RoomRegistry and RoomRuntime", () => {
       session: sessions[0]!,
       settings: {},
     });
-    const binding = registry.bindingForSession(sessions[0]!.id);
+    const binding = registry.currentRoomForAccount(accounts[0]!.id);
     if (!binding) throw new Error("测试房间没有预绑定成员");
 
     await created.room.resume(
       binding.memberId,
+      accountIdSchema.parse(accounts[0]!.id),
       sessionIdSchema.parse(sessions[0]!.id),
       "connection-initial-resume",
     );
@@ -669,7 +690,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     created.room.destroy("host_closed", "测试结束");
   });
 
-  it("lets a new transport take over a stale connected transport from the same session", async () => {
+  it("lets a new transport take over a stale connected transport from the same account", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers);
     const disconnectConnection = vi.fn();
     registry.setPublisher({
@@ -694,6 +715,7 @@ describe("RoomRegistry and RoomRuntime", () => {
 
     await created.room.resume(
       joined.member.memberId,
+      accountIdSchema.parse(account.id),
       sessionIdSchema.parse(session.id),
       "connection-replacement",
     );
@@ -705,7 +727,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(disconnectConnection).toHaveBeenCalledWith(
       "connection-stale",
       4001,
-      "连接已由同一设备接管",
+      "连接已由同一账号接管",
     );
 
     await created.room.connectionLost(joined.member.memberId, "connection-stale");
@@ -741,7 +763,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(created.room.state.members.size).toBe(1);
     expect(created.room.state.members.has(guest.member.memberId)).toBe(true);
     expect(created.room.state.hostMemberId).toBe(guest.member.memberId);
-    expect(registry.bindingForSession(sessions[0]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[0]!.id)).toBeUndefined();
     expect(created.room.projectSnapshot(guest.member.memberId).room.name).toBe("访客已进入房间");
     created.room.destroy("host_closed", "测试结束");
   });
@@ -771,8 +793,8 @@ describe("RoomRegistry and RoomRuntime", () => {
     await created.room.connectionLost(joined.member.memberId, "connection-lobby-host");
 
     expect(created.room.destroyed).toBe(true);
-    expect(joined.member).toMatchObject({ connectionStatus: "offline" });
-    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toBeUndefined();
+    expect(created.room.state.members.has(joined.member.memberId)).toBe(false);
+    expect(registry.currentRoomForAccount(accounts[0]!.id)).toBeUndefined();
     expect(() => registry.require(created.room.state.roomId)).toThrowError(
       expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
     );
@@ -813,13 +835,13 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(created.room.state.members.has(host.member.memberId)).toBe(false);
     expect(created.room.state.hostMemberId).toBe(guest.member.memberId);
     expect(guest.member.connectionStatus).toBe("connected");
-    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[0]!.id)).toBeUndefined();
 
     await created.room.connectionLost(guest.member.memberId, "connection-lobby-guest");
 
     expect(created.room.destroyed).toBe(true);
-    expect(guest.member.connectionStatus).toBe("offline");
-    expect(registry.bindingForSession(sessions[1]!.id, created.room.state.roomId)).toBeUndefined();
+    expect(created.room.state.members.has(guest.member.memberId)).toBe(false);
+    expect(registry.currentRoomForAccount(accounts[1]!.id)).toBeUndefined();
     expect(() => registry.require(created.room.state.roomId)).toThrowError(
       expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
     );
@@ -855,7 +877,7 @@ describe("RoomRegistry and RoomRuntime", () => {
 
     await expect(pending).rejects.toMatchObject({ code: "GAME_SERVICE_DISABLED" });
     expect(registry.listPublicRooms()).toHaveLength(0);
-    expect(registry.bindingForSession(sessions[0]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[0]!.id)).toBeUndefined();
   });
 
   it("rechecks the account session after password hashing", async () => {
@@ -888,7 +910,7 @@ describe("RoomRegistry and RoomRuntime", () => {
 
     await expect(pending).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
     expect(registry.listPublicRooms()).toHaveLength(0);
-    expect(registry.bindingForSession(sessions[0]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[0]!.id)).toBeUndefined();
   });
 
   it("rechecks room availability after password verification", async () => {
@@ -927,7 +949,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     finishVerify?.(true);
 
     await expect(pending).rejects.toMatchObject({ code: "ROOM_NOT_FOUND" });
-    expect(registry.bindingForSession(sessions[1]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[1]!.id)).toBeUndefined();
   });
 
   it("keeps one valid AI task while chat changes the room revision", async () => {
@@ -1049,7 +1071,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(created.room.state.match?.state).toMatchObject({ moves: 0, turn: "seat-1" });
     await created.room.leave(joined.member.memberId);
     expect(created.room.destroyed).toBe(true);
-    expect(registry.bindingForSession(sessions[1]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[1]!.id)).toBeUndefined();
     expect(() => registry.require(created.room.state.roomId)).toThrowError(
       expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
     );
@@ -1153,7 +1175,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     await created.room.queue.run(() => undefined);
 
     expect(created.room.destroyed).toBe(true);
-    expect(registry.bindingForSession(sessions[1]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[1]!.id)).toBeUndefined();
     expect(() => registry.require(created.room.state.roomId)).toThrowError(
       expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
     );
@@ -1200,7 +1222,7 @@ describe("RoomRegistry and RoomRuntime", () => {
         settings: {},
       }),
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
-    expect(registry.bindingForSession(sessions[0]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[0]!.id)).toBeUndefined();
   });
 
   it("rejects an unknown practice AI profile", async () => {
@@ -1217,7 +1239,7 @@ describe("RoomRegistry and RoomRuntime", () => {
         settings: {},
       }),
     ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
-    expect(registry.bindingForSession(sessions[0]!.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(accounts[0]!.id)).toBeUndefined();
   });
 
   it("rejects practice settings that the game plugin cannot start", async () => {
@@ -1255,7 +1277,7 @@ describe("RoomRegistry and RoomRuntime", () => {
       code: "GAME_ILLEGAL_ACTION",
       details: { ruleCode: "BOTS_NOT_ALLOWED_IN_RENJU" },
     });
-    expect(registry.bindingForSession(session.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(account.id)).toBeUndefined();
   });
 
   it("ends gomoku with a disconnect loss when the reconnect grace expires", async () => {
@@ -1280,8 +1302,8 @@ describe("RoomRegistry and RoomRuntime", () => {
       kind: "fallback",
       reason: "disconnect",
     });
-    expect(registry.listPublicRooms(loser.session.id)[0]).toMatchObject({
-      resumeAvailable: true,
+    expect(registry.currentRoomForAccount(loser.account.id)).toMatchObject({
+      memberId: loser.member.memberId,
       roomId: room.state.roomId,
     });
 
@@ -1290,13 +1312,8 @@ describe("RoomRegistry and RoomRuntime", () => {
 
     const snapshot = room.projectSnapshot(winner.member.memberId);
     expect(room.state.status).toBe("post_match");
-    expect(loser.member).toMatchObject({ connectionStatus: "offline" });
     expect(room.state.members.has(loser.member.memberId)).toBe(false);
-    expect(registry.bindingForSession(loser.session.id)).toBeUndefined();
-    expect(registry.listPublicRooms(loser.session.id)[0]).toMatchObject({
-      resumeAvailable: false,
-      roomId: room.state.roomId,
-    });
+    expect(registry.currentRoomForAccount(loser.account.id)).toBeUndefined();
     expect(room.state.seats.find(({ seatId }) => seatId === loser.seatId)?.occupant).toBeNull();
     expect(snapshot.gameView).toMatchObject({
       outcome: { reason: "disconnected", winnerSeatId: winner.seatId },
@@ -1305,7 +1322,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(snapshot.displayEvents).toEqual([]);
   });
 
-  it("treats a manual departure during play as reconnectable connection loss", async () => {
+  it("treats a confirmed manual departure during play as an immediate exit", async () => {
     const { players, registry, room } = await createStartedRealGameRoom(closers, {
       gameId: "gomoku",
       seatIds: ["seat-1", "seat-2"],
@@ -1318,22 +1335,15 @@ describe("RoomRegistry and RoomRuntime", () => {
     });
     const departing = players[0]!;
 
-    await room.departConnection(departing.member.memberId, departing.connectionId);
+    await room.leave(departing.member.memberId);
 
-    expect(departing.member.connectionStatus).toBe("reconnecting");
-    expect(room.state.members.has(departing.member.memberId)).toBe(true);
-    expect(registry.bindingForSession(departing.session.id, room.state.roomId)).toBeDefined();
-    expect(registry.listPublicRooms(departing.session.id)[0]).toMatchObject({
-      resumeAvailable: true,
-      roomId: room.state.roomId,
+    expect(room.state.members.has(departing.member.memberId)).toBe(false);
+    expect(registry.currentRoomForAccount(departing.account.id)).toBeUndefined();
+    expect(room.state.status).toBe("post_match");
+    expect(room.projectSnapshot(players[1]!.member.memberId).gameView).toMatchObject({
+      outcome: { reason: "left", winnerSeatId: players[1]!.seatId },
+      phase: "ended",
     });
-
-    await room.resume(
-      departing.member.memberId,
-      sessionIdSchema.parse(departing.session.id),
-      "connection-returned",
-    );
-    expect(departing.member.connectionStatus).toBe("connected");
   });
 
   it("removes an expired ludo member and keeps non-reclaimable AI control", async () => {
@@ -1370,9 +1380,8 @@ describe("RoomRegistry and RoomRuntime", () => {
         readonly seatId: string;
       }[];
     };
-    expect(disconnected.member.connectionStatus).toBe("offline");
     expect(room.state.members.has(disconnected.member.memberId)).toBe(false);
-    expect(registry.bindingForSession(disconnected.session.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(disconnected.account.id)).toBeUndefined();
     expect(expiredView.seats.find(({ seatId }) => seatId === disconnected.seatId)).toMatchObject({
       controller: "persistent_ai",
       reclaimable: false,
@@ -1478,7 +1487,7 @@ describe("RoomRegistry and RoomRuntime", () => {
 
     expect(created.room.state.members.has(spectator.member.memberId)).toBe(false);
     expect(registry.listPublicRooms()[0]).toMatchObject({ spectatorCount: 0 });
-    expect(registry.bindingForSession(spectatorSession.id)).toBeUndefined();
+    expect(registry.currentRoomForAccount(spectatorAccount.id)).toBeUndefined();
   });
 
   it("transfers host control to a connected member when the host grace expires", async () => {
@@ -1586,7 +1595,6 @@ describe("RoomRegistry and RoomRuntime", () => {
     await vi.advanceTimersByTimeAsync(0);
     await created.room.queue.run(() => undefined);
     expect(created.room.destroyed).toBe(false);
-    expect(host.member.connectionStatus).toBe("offline");
     expect(created.room.state.members.has(host.member.memberId)).toBe(false);
     expect(guest.member.connectionStatus).toBe("reconnecting");
     expect(created.room.state.hostMemberId).toBe(guest.member.memberId);

@@ -58,6 +58,36 @@ describe("web routes", () => {
     expect(screen.getByText("单人练习")).toBeInTheDocument();
   });
 
+  it("shows a quick return action for the account current room", async () => {
+    const currentRoomId = "room-current";
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock("user", {
+        currentRoomId,
+        rooms: [
+          {
+            gameId: "gomoku",
+            hasPassword: false,
+            hostName: "当前房主",
+            joinable: false,
+            maxPlayers: 2,
+            maxSpectators: 10,
+            name: "正在进行的房间",
+            occupiedSeats: 2,
+            roomId: currentRoomId,
+            spectatorCount: 0,
+            status: "playing",
+          },
+        ],
+      }),
+    );
+
+    renderAt("/");
+
+    const returnLink = await screen.findByRole("link", { name: "返回当前房间" });
+    expect(returnLink).toHaveAttribute("href", `/rooms/${currentRoomId}`);
+  });
+
   it("creates solo practice with its selected billiards settings and no AI profile", async () => {
     let createRoomBody: Record<string, unknown> | undefined;
     vi.stubGlobal(
@@ -107,9 +137,11 @@ describe("web routes", () => {
 function createFetchMock(
   role: "admin" | "user" | null,
   options: {
+    readonly currentRoomId?: string | null;
     readonly games?: readonly unknown[];
     readonly logoutFails?: boolean;
     readonly onCreateRoom?: (body: Record<string, unknown>) => void;
+    readonly rooms?: readonly unknown[];
   } = {},
 ) {
   return vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -175,7 +207,12 @@ function createFetchMock(
         201,
       );
     }
-    if (url.includes("/rooms")) return jsonResponse({ rooms: [] });
+    if (url.includes("/rooms")) {
+      return jsonResponse({
+        currentRoomId: options.currentRoomId ?? null,
+        rooms: options.rooms ?? [],
+      });
+    }
     throw new Error(`unexpected request: ${url}`);
   });
 }

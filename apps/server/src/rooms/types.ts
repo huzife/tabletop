@@ -14,11 +14,11 @@ export type InternalRoomStatus = "lobby" | "playing" | "post_match";
 export interface RoomMemberState {
   readonly memberId: MemberId;
   readonly accountId: AccountId;
-  readonly sessionId: SessionId;
+  sessionId: SessionId;
   readonly displayName: string;
   readonly joinedAt: number;
   role: "player" | "spectator";
-  connectionStatus: "connected" | "reconnecting" | "offline";
+  connectionStatus: "connected" | "reconnecting";
   connectionId?: string;
   reconnectUntil?: number;
 }

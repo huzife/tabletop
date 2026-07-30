@@ -13,6 +13,7 @@ import {
   matchIdSchema,
   memberIdSchema,
   roomSnapshotPayloadSchema,
+  type AccountId,
   type JsonValue,
   type MemberId,
   type SeatId,
@@ -108,7 +109,6 @@ export class RoomRuntime {
           seatId: this.#seatForMember(memberId)?.seatId ?? ("" as SeatId),
         });
       }
-      this.#transferOfflineHostToConnectedMember();
       this.#changed(events);
     });
   }
@@ -124,25 +124,19 @@ export class RoomRuntime {
     });
   }
 
-  departConnection(memberId: MemberId, connectionId: string, now = Date.now()): Promise<void> {
+  resume(
+    memberId: MemberId,
+    accountId: AccountId,
+    sessionId: SessionId,
+    connectionId: string,
+  ): Promise<void> {
     return this.queue.run(() => {
       const member = this.#requireMember(memberId);
-      if (member.connectionId !== connectionId) {
-        return;
-      }
-
-      this.#disconnectOrRemoveMember(member, now);
-    });
-  }
-
-  resume(memberId: MemberId, sessionId: SessionId, connectionId: string): Promise<void> {
-    return this.queue.run(() => {
-      const member = this.#requireMember(memberId);
-      if (member.sessionId !== sessionId) {
-        throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前会话不能恢复该房间座位");
+      if (member.accountId !== accountId) {
+        throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前账号不能返回该房间");
       }
       const initialAttachment =
-        member.connectionStatus === "offline" && member.connectionId === undefined;
+        member.connectionStatus === "connected" && member.connectionId === undefined;
       const restoringConnection =
         member.connectionStatus === "reconnecting" &&
         member.reconnectUntil !== undefined &&
@@ -155,19 +149,19 @@ export class RoomRuntime {
         throw new HttpError(409, "ROOM_INVALID_STATE", "房间重连窗口已经结束");
       }
       const previousConnectionId = member.connectionId;
+      member.sessionId = sessionId;
       member.connectionId = connectionId;
       member.connectionStatus = "connected";
       delete member.reconnectUntil;
       this.#clearReconnectTimer(memberId);
       if (takingOverConnection && previousConnectionId !== undefined) {
-        this.#publisher.disconnectConnection(previousConnectionId, 4001, "连接已由同一设备接管");
+        this.#publisher.disconnectConnection(previousConnectionId, 4001, "连接已由同一账号接管");
       }
       const seat = this.#seatForMember(memberId);
       const events =
         restoringConnection && seat
           ? this.#handleSystemEvent({ type: "connection.restored", seatId: seat.seatId })
           : [];
-      this.#transferOfflineHostToConnectedMember();
       this.#changed(events);
     });
   }
@@ -1008,7 +1002,6 @@ export class RoomRuntime {
           ) {
             return;
           }
-          member.connectionStatus = "offline";
           delete member.reconnectUntil;
           const seatBeforeEvent = this.#seatForMember(member.memberId);
           const events = seatBeforeEvent
@@ -1029,7 +1022,6 @@ export class RoomRuntime {
   #disconnectOrRemoveMember(member: RoomMemberState, now: number): void {
     delete member.connectionId;
     if (this.state.status !== "playing") {
-      member.connectionStatus = "offline";
       delete member.reconnectUntil;
       this.#removeDepartedMember(member, []);
       return;
@@ -1152,15 +1144,6 @@ export class RoomRuntime {
       throw new Error("房间没有可转移的房主");
     }
     this.state.hostMemberId = nextHost.memberId;
-  }
-
-  #transferOfflineHostToConnectedMember(): void {
-    const host = this.state.members.get(this.state.hostMemberId);
-    if (host?.connectionStatus !== "offline") return;
-    const nextHost = [...this.state.members.values()]
-      .filter((member) => member.connectionStatus === "connected")
-      .sort((left, right) => left.joinedAt - right.joinedAt)[0];
-    if (nextHost) this.state.hostMemberId = nextHost.memberId;
   }
 
   #requireExpectedRevision(expectedRevision: number): void {

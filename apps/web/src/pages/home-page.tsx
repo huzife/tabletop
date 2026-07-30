@@ -11,6 +11,8 @@ export function HomePage() {
   const roomsQuery = useRooms();
   const games = gamesQuery.data?.games ?? [];
   const rooms = roomsQuery.data?.rooms ?? [];
+  const currentRoomId = roomsQuery.data?.currentRoomId ?? null;
+  const currentRoom = rooms.find((room) => room.roomId === currentRoomId);
 
   return (
     <div className="page page--wide">
@@ -28,6 +30,20 @@ export function HomePage() {
           </span>
         </div>
       </header>
+
+      {currentRoomId !== null ? (
+        <section aria-labelledby="current-room-title" className="current-room-banner">
+          <div>
+            <span className="eyebrow">当前房间</span>
+            <h2 id="current-room-title">{currentRoom?.name ?? "已加入的房间"}</h2>
+            <p>当前账号已有所在房间，可直接返回继续游戏。</p>
+          </div>
+          <Link className="action-link" to={`/rooms/${currentRoomId}`}>
+            返回当前房间
+            <ArrowRight size={17} />
+          </Link>
+        </section>
+      ) : null}
 
       <section aria-labelledby="games-title" className="page-section">
         <div className="section-heading">
@@ -80,7 +96,7 @@ export function HomePage() {
         <div className="section-heading">
           <h2 id="rooms-title">公开房间</h2>
         </div>
-        <RoomList rooms={rooms} />
+        <RoomList currentRoomId={currentRoomId} rooms={rooms} />
       </section>
     </div>
   );

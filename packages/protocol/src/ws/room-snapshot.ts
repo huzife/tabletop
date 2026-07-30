@@ -12,7 +12,7 @@ import {
 import { jsonValueSchema, type JsonValue } from "../json.js";
 import { roomStatusSchema } from "../room.js";
 
-export const memberConnectionStatusSchema = z.enum(["connected", "reconnecting", "offline"]);
+export const memberConnectionStatusSchema = z.enum(["connected", "reconnecting"]);
 
 export const roomMemberSchema = z.strictObject({
   memberId: memberIdSchema,

@@ -12,14 +12,22 @@ participant "Game Host / 插件" as Host
 participant "Deadline Scheduler" as Scheduler
 participant "可选兜底控制器" as Fallback
 
-玩家 -> 浏览器 : 离开、刷新、关闭或网络中断
-浏览器 -> Gateway : 主动关闭（尽力）或连接丢失
-Gateway -> Queue : connection.lost(sessionId)
+alt 用户点击“离开房间”
+  浏览器 -> 玩家 : 对局中警告并询问
+  玩家 -> 浏览器 : 确认退出
+  浏览器 -> Gateway : room.leave
+  Gateway -> Queue : member.left(accountId)
+  Queue -> Host : handleSystemEvent(member.left)
+  Host --> Queue : outcome + 通用房间指令
+  Queue -> Queue : 删除成员并清空当前房间
+else 页面离开或连接丢失
+  浏览器 -> Gateway : 主动关闭（尽力）或连接丢失
+  Gateway -> Queue : connection.lost(accountId)
 
-alt 非对局阶段
-  Queue -> Queue : 立即移除成员、座位和恢复绑定
-  Queue --> Gateway : 广播最新房间快照
-else 对局进行中
+  alt 非对局阶段
+    Queue -> Queue : 立即移除成员、座位并清空当前房间
+    Queue --> Gateway : 广播最新房间快照
+  else 对局进行中
   Queue -> Scheduler : 注册 30 秒恢复截止任务
   Queue -> Host : handleSystemEvent(connection.lost)
   Host --> Queue : 新状态 + 可选房间指令
@@ -31,10 +39,10 @@ else 对局进行中
     Host --> Queue : 转换结果
   end
 
-  alt 30 秒内重新进入
-    玩家 -> 浏览器 : 在大厅点击“重新进入”
+  alt 30 秒内返回当前房间
+    玩家 -> 浏览器 : 在首页点击“返回当前房间”
     浏览器 -> Gateway : room.resume(roomId)
-    Gateway -> Queue : 校验账号、sessionId、恢复凭据
+    Gateway -> Queue : 校验账号当前房间
     Queue -> Scheduler : 取消恢复截止任务
     Queue -> Host : handleSystemEvent(connection.restored)
     Host --> Queue : 新状态 + 控制器指令
@@ -43,7 +51,8 @@ else 对局进行中
     Scheduler -> Queue : reconnect.deadline
     Queue -> Host : handleSystemEvent(connection.grace_expired)
     Host --> Queue : outcome + 通用房间指令
-    Queue -> Queue : 执行转换、删除成员并释放绑定
+    Queue -> Queue : 执行转换、删除成员并清空当前房间
+  end
   end
 end
 @enduml

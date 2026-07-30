@@ -125,7 +125,7 @@ describe("room HTTP routes", () => {
       );
     }
     expect(createResponses.slice(0, 5).map(({ statusCode }) => statusCode)).toEqual([
-      201, 201, 201, 201, 201,
+      201, 409, 409, 409, 409,
     ]);
     expect(createResponses[0]?.headers["cache-control"]).toBe("no-store");
     expect(createResponses[5]?.statusCode).toBe(429);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createRoomRequestSchema,
+  roomsResponseSchema,
   roomSummarySchema,
   roomConnectionOpenRequestSchema,
   roomConnectionOpenResponseSchema,
@@ -33,23 +34,28 @@ describe("room HTTP schemas", () => {
     ).toThrow();
   });
 
-  it("exposes whether the current session can resume a room", () => {
-    expect(
-      roomSummarySchema.parse({
-        gameId: "gomoku",
-        hasPassword: false,
-        hostName: "测试房主",
-        joinable: true,
-        maxPlayers: 2,
-        maxSpectators: 10,
-        name: "测试房间",
-        occupiedSeats: 2,
-        resumeAvailable: true,
-        roomId: "room-test",
-        spectatorCount: 0,
-        status: "playing",
-      }),
-    ).toMatchObject({ resumeAvailable: true });
+  it("exposes the account current room as a nullable value", () => {
+    const room = roomSummarySchema.parse({
+      gameId: "gomoku",
+      hasPassword: false,
+      hostName: "测试房主",
+      joinable: true,
+      maxPlayers: 2,
+      maxSpectators: 10,
+      name: "测试房间",
+      occupiedSeats: 2,
+      roomId: "room-test",
+      spectatorCount: 0,
+      status: "playing",
+    });
+
+    expect(roomsResponseSchema.parse({ currentRoomId: room.roomId, rooms: [room] })).toMatchObject({
+      currentRoomId: room.roomId,
+    });
+    expect(roomsResponseSchema.parse({ currentRoomId: null, rooms: [] })).toEqual({
+      currentRoomId: null,
+      rooms: [],
+    });
   });
 
   it("validates long-polling connection responses with protocol messages", () => {

@@ -1,5 +1,6 @@
 import { DoorOpen, LockKeyhole, UsersRound } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { roomIdSchema } from "@tabletop/protocol";
 import type { RoomSummary } from "@tabletop/protocol/http";
 import { Badge, Button, EmptyState, TextField } from "@tabletop/ui";
 import { useNavigate } from "react-router";
@@ -13,7 +14,13 @@ const statusLabels: Record<RoomSummary["status"], string> = {
   post_match: "已结束",
 };
 
-export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
+export function RoomList({
+  currentRoomId,
+  rooms,
+}: {
+  readonly currentRoomId: string | null;
+  readonly rooms: readonly RoomSummary[];
+}) {
   const navigate = useNavigate();
   const joinTicket = useRoomJoinTicket();
   const [passwordRoomId, setPasswordRoomId] = useState<string | null>(null);
@@ -23,6 +30,17 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
     readonly roomId: string;
     readonly message: string;
   }>();
+
+  function redirectToCurrentRoom(targetRoomId: string, knownCurrentRoomId = currentRoomId) {
+    if (knownCurrentRoomId === null) return false;
+    if (
+      knownCurrentRoomId === targetRoomId ||
+      window.confirm("当前账号已经在另一个房间中，是否返回当前房间？")
+    ) {
+      navigate(`/rooms/${knownCurrentRoomId}`);
+    }
+    return true;
+  }
 
   async function enterRoom(room: RoomSummary, roomPassword?: string) {
     setJoiningRoomId(room.roomId);
@@ -36,13 +54,14 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
         state: { joinTicket: ticket.joinTicket },
       });
     } catch (error) {
-      if (
-        error instanceof ApiClientError &&
-        error.code === "CONNECTION_ROOM_CONFLICT" &&
-        error.details.resumeAvailable === true
-      ) {
-        navigate(`/rooms/${room.roomId}`);
-        return;
+      if (error instanceof ApiClientError && error.code === "CONNECTION_ROOM_CONFLICT") {
+        const parsedCurrentRoomId = roomIdSchema.safeParse(error.details.currentRoomId);
+        if (
+          parsedCurrentRoomId.success &&
+          redirectToCurrentRoom(room.roomId, parsedCurrentRoomId.data)
+        ) {
+          return;
+        }
       }
       setJoinError({
         roomId: room.roomId,
@@ -55,10 +74,7 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
 
   function requestEntry(room: RoomSummary) {
     setJoinError(undefined);
-    if (room.resumeAvailable) {
-      navigate(`/rooms/${room.roomId}`);
-      return;
-    }
+    if (redirectToCurrentRoom(room.roomId)) return;
     if (room.hasPassword) {
       setPassword("");
       setPasswordRoomId(room.roomId);
@@ -119,7 +135,7 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
                 </Badge>
               </td>
               <td>
-                {passwordRoomId === room.roomId && !room.resumeAvailable ? (
+                {passwordRoomId === room.roomId && currentRoomId !== room.roomId ? (
                   <form
                     className="form-stack form-stack--compact"
                     onSubmit={(event) => submitPassword(event, room)}
@@ -157,8 +173,8 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
                     >
                       {joiningRoomId === room.roomId
                         ? "正在进入"
-                        : room.resumeAvailable
-                          ? "重新进入"
+                        : currentRoomId === room.roomId
+                          ? "返回房间"
                           : room.status === "playing"
                             ? "观战"
                             : "进入"}

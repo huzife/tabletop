@@ -63,6 +63,7 @@ export interface UseRoomSocketResult {
   readonly connectionStatus: RoomConnectionStatus;
   readonly error: RoomSocketError | null;
   readonly pendingCommandTypes: readonly ClientCommand["type"][];
+  readonly pendingRequestIds: readonly RequestId[];
   readonly retry: () => void;
   readonly sendCommand: (command: RoomCommandInput) => RequestId | null;
   readonly sendTransientEvent: (
@@ -620,7 +621,7 @@ export function useRoomSocket(
                 : "AUTH_SESSION_EXPIRED",
             event.reason ||
               (event.code === 4001
-                ? "房间控制已转移到同一设备的其他页面"
+                ? "房间控制已转移到同一账号的其他页面"
                 : event.code === 4003
                   ? "已被房主移出房间"
                   : "登录会话已失效"),
@@ -899,6 +900,7 @@ export function useRoomSocket(
     connectionStatus,
     error,
     pendingCommandTypes: [...pendingCommands.values()],
+    pendingRequestIds: [...pendingCommands.keys()],
     retry,
     sendCommand,
     sendTransientEvent,

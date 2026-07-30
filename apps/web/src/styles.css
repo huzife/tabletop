@@ -259,6 +259,27 @@ h3 {
   gap: 7px;
 }
 
+.current-room-banner {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  border-radius: 10px;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  padding: 20px 22px;
+}
+
+.current-room-banner h2,
+.current-room-banner p {
+  margin: 0;
+}
+
+.current-room-banner p {
+  color: var(--muted);
+  margin-top: 6px;
+}
+
 .page-section {
   margin-top: 34px;
 }

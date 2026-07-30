@@ -221,7 +221,7 @@ interface GameOutcomeV1 {
 
 ### 7.1 连接与成员系统事件
 
-平台在非对局阶段直接清理离开的成员，只在对局阶段维护 30 秒恢复窗口，不决定连接变化对比赛的含义。手动退出、页面离开和物理断线在对局中都先表现为 `connection.lost`。房间队列在确定顺序点调用 `handleSystemEvent`，当前 v1 事件类型为：
+平台在非对局阶段直接清理离开的成员，只为对局阶段的页面离开、刷新、关闭、网络中断或传输失效维护 30 秒恢复窗口，不决定连接变化对比赛的含义。这些被动断开表现为 `connection.lost`；用户确认手动退出或账号被强制移除表现为 `member.left`，不会先进入恢复窗口。房间队列在确定顺序点调用 `handleSystemEvent`，当前 v1 事件类型为：
 
 ```ts
 type GameSystemEventV1 =
@@ -238,11 +238,11 @@ type GameRoomDirectiveV1 =
   | { type: "seat.setReclaimable"; seatId: SeatId; reclaimable: boolean };
 ```
 
-事件只描述平台事实，指令只描述平台能够执行的通用房间变化。插件通过 `outcome` 决定是否结束比赛，通过 `roomDirectives` 决定控制器和座位策略。`connection.grace_expired` 处理完成后平台总会移除成员、释放恢复绑定并清除座位取回权限；插件只能决定退出后的比赛结果、自动控制或座位释放。具体游戏必须在自己的文档中说明每个事件返回什么；平台核心不得根据 `gameId` 补充默认结局。
+事件只描述平台事实，指令只描述平台能够执行的通用房间变化。插件通过 `outcome` 决定是否结束比赛，通过 `roomDirectives` 决定控制器和座位策略。`member.left` 或 `connection.grace_expired` 处理完成后平台总会移除成员、清空账号当前房间并清除座位取回权限；插件只能决定退出后的比赛结果、自动控制或座位释放。具体游戏必须在自己的文档中说明每个事件返回什么；平台核心不得根据 `gameId` 补充默认结局。
 
-`connection.restored` 只表示原会话在窗口内通过验证。插件可以返回真人控制，也可以因为比赛已经结束而不返回指令。任何已提交的自动动作都不会由平台自动回滚。
+`connection.restored` 只表示同一账号在窗口内通过验证，不要求沿用原登录会话。插件可以返回真人控制，也可以因为比赛已经结束而不返回指令。任何已提交的自动动作都不会由平台自动回滚。
 
-`connection.lost.graceDeadlineMs` 是 30 秒窗口结束的 UTC Unix 毫秒时间。窗口到期后的成员删除、绑定释放和房主转移由平台统一完成，不属于插件指令；插件只决定比赛 outcome、座位 controller 和座位释放。到期退出的座位不得设置为可取回。
+`connection.lost.graceDeadlineMs` 是 30 秒窗口结束的 UTC Unix 毫秒时间。主动退出或窗口到期后的成员删除、账号当前房间清空和房主转移由平台统一完成，不属于插件指令；插件只决定比赛 outcome、座位 controller 和座位释放。退出座位不得设置为可取回。
 
 ## 8. 随机数与时间
 

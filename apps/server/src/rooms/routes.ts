@@ -44,14 +44,18 @@ export async function registerRoomRoutes(
   app.get("/api/v1/rooms", async (request, reply) => {
     const identity = requireSession(auth, request);
     const query = roomListQuerySchema.parse(request.query);
+    const currentRoom = rooms.currentRoomForAccount(identity.account.id);
     const roomsResponse = rooms
-      .listPublicRooms(identity.session.id)
+      .listPublicRooms(identity.account.id)
       .filter((room) => (query.gameId ? room.gameId === query.gameId : true))
       .filter((room) => (query.status ? room.status === query.status : true))
       .filter((room) => (query.joinable === undefined ? true : room.joinable === query.joinable));
-    return reply
-      .header("cache-control", "no-store")
-      .send(roomsResponseSchema.parse({ rooms: roomsResponse }));
+    return reply.header("cache-control", "no-store").send(
+      roomsResponseSchema.parse({
+        currentRoomId: currentRoom?.roomId ?? null,
+        rooms: roomsResponse,
+      }),
+    );
   });
 
   app.post("/api/v1/rooms", async (request, reply) => {

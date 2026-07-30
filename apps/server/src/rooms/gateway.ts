@@ -522,12 +522,9 @@ export class RoomConnectionGateway implements RoomPublisher {
     }
 
     if (command.type === "room.resume") {
-      const binding = this.#rooms.bindingForSession(
-        connection.identity.session.id,
-        command.payload.roomId,
-      );
-      if (!binding) {
-        throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前会话没有可恢复的房间");
+      const binding = this.#rooms.currentRoomForAccount(connection.identity.account.id);
+      if (!binding || binding.roomId !== command.payload.roomId) {
+        throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前账号不在该房间");
       }
       const room = this.#rooms.require(binding.roomId);
       connection.memberId = binding.memberId;
@@ -535,6 +532,7 @@ export class RoomConnectionGateway implements RoomPublisher {
       if (!this.#isOpen(connection)) return;
       await room.resume(
         binding.memberId,
+        connection.identity.account.id as import("@tabletop/protocol").AccountId,
         connection.identity.session.id as import("@tabletop/protocol").SessionId,
         connection.connectionId,
       );
@@ -547,7 +545,7 @@ export class RoomConnectionGateway implements RoomPublisher {
     let stateChanged = true;
     switch (command.type) {
       case "room.leave":
-        await room.departConnection(memberId, connection.connectionId);
+        await room.leave(memberId);
         delete connection.memberId;
         delete connection.roomId;
         break;

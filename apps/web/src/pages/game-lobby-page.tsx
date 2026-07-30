@@ -2,7 +2,7 @@ import { ArrowLeft, Bot, KeyRound, Plus, Settings2, UsersRound } from "lucide-re
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import type { AnyGameWebModuleV1 } from "@tabletop/game-sdk/web";
-import type { JsonValue } from "@tabletop/protocol";
+import { roomIdSchema, type JsonValue } from "@tabletop/protocol";
 import type { GameCatalogEntry } from "@tabletop/protocol/http";
 import { Badge, Button, TextField } from "@tabletop/ui";
 
@@ -62,6 +62,7 @@ function GameLobbyContent({
   );
   const [createError, setCreateError] = useState("");
   const rooms = roomsQuery.data?.rooms ?? [];
+  const currentRoomId = roomsQuery.data?.currentRoomId ?? null;
   const SettingsEditor = gameModule.SettingsEditor;
   const hasBotProfiles = game.botProfiles.length > 0;
   const practiceAvailable = game.capabilities.bots || game.capabilities.soloPractice;
@@ -69,6 +70,12 @@ function GameLobbyContent({
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCreateError("");
+    if (currentRoomId !== null) {
+      if (window.confirm("当前账号已经在一个房间中，是否返回当前房间？")) {
+        navigate(`/rooms/${currentRoomId}`);
+      }
+      return;
+    }
     const parsedSettings = gameModule.shared.settings.schema.safeParse(settings);
     if (!parsedSettings.success) {
       setCreateError("对局设置无效，请检查后重试");
@@ -90,6 +97,15 @@ function GameLobbyContent({
         },
       });
     } catch (error) {
+      if (error instanceof ApiClientError && error.code === "CONNECTION_ROOM_CONFLICT") {
+        const parsedCurrentRoomId = roomIdSchema.safeParse(error.details.currentRoomId);
+        if (parsedCurrentRoomId.success) {
+          if (window.confirm("当前账号已经在一个房间中，是否返回当前房间？")) {
+            navigate(`/rooms/${parsedCurrentRoomId.data}`);
+          }
+          return;
+        }
+      }
       setCreateError(error instanceof ApiClientError ? error.message : "暂时无法创建房间");
     }
   }
@@ -223,7 +239,7 @@ function GameLobbyContent({
               {roomsQuery.error.message}
             </div>
           ) : null}
-          <RoomList rooms={rooms} />
+          <RoomList currentRoomId={currentRoomId} rooms={rooms} />
         </section>
       </div>
     </div>

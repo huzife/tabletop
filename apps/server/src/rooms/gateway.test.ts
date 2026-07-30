@@ -235,7 +235,7 @@ describe("RoomConnectionGateway", () => {
     });
   });
 
-  it("lets a new same-session connection take over a stale room connection", async () => {
+  it("lets a new same-account connection take over a stale room connection", async () => {
     const { origin, runtime, wsUrl } = await startTestRuntime(cleanups);
     runtime.repositories.accounts.create({
       passwordHash: await new PasswordService(1).hash("takeover-password"),
@@ -271,7 +271,8 @@ describe("RoomConnectionGateway", () => {
     });
     await joined;
 
-    const replacementSocket = await openSocket(wsUrl, origin, cookies, cleanups);
+    const replacementCookies = await login(runtime, "连接接管用户", "takeover-password");
+    const replacementSocket = await openSocket(wsUrl, origin, replacementCookies, cleanups);
     const staleClosed = waitForSocketClose(staleSocket);
     const resumed = waitForSnapshot(replacementSocket, created.roomId, (message) =>
       message.payload.members.some(({ connectionStatus }) => connectionStatus === "connected"),
@@ -285,7 +286,7 @@ describe("RoomConnectionGateway", () => {
 
     await expect(staleClosed).resolves.toMatchObject({
       code: 4001,
-      reason: "连接已由同一设备接管",
+      reason: "连接已由同一账号接管",
     });
     await expect(resumed).resolves.toMatchObject({
       roomId: created.roomId,
@@ -413,75 +414,62 @@ describe("RoomConnectionGateway", () => {
     expect(closedResponse.statusCode).toBe(204);
   });
 
-  it("keeps two long-polling connections from one session isolated across rooms", async () => {
+  it("enforces one current room across sessions over long polling", async () => {
     const { origin, runtime } = await startTestRuntime(cleanups);
     runtime.repositories.accounts.create({
-      passwordHash: await new PasswordService(1).hash("multi-room-polling-password"),
-      username: "多房间轮询用户",
+      passwordHash: await new PasswordService(1).hash("unique-room-polling-password"),
+      username: "唯一房间轮询用户",
     });
-    const cookies = await login(runtime, "多房间轮询用户", "multi-room-polling-password");
+    const cookies = await login(runtime, "唯一房间轮询用户", "unique-room-polling-password");
     const headers = unsafeHeaders(cookies, origin);
-
-    const createRoom = async (name: string) => {
-      const response = await runtime.app.inject({
-        headers,
-        method: "POST",
-        payload: {
-          gameId: "gomoku",
-          name,
-          practice: false,
-          settings: {
-            moveTimeSeconds: 60,
-            rule: "freestyle",
-            timerEnabled: false,
-            totalTimeMinutes: 10,
-          },
+    const roomResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: {
+        gameId: "gomoku",
+        name: "账号唯一房间",
+        practice: false,
+        settings: {
+          moveTimeSeconds: 60,
+          rule: "freestyle",
+          timerEnabled: false,
+          totalTimeMinutes: 10,
         },
-        url: "/api/v1/rooms",
-      });
-      expect(response.statusCode).toBe(201);
-      return response.json() as { joinTicket: string; roomId: string };
-    };
-    const openConnection = async () => {
-      const response = await runtime.app.inject({
-        headers,
-        method: "POST",
-        payload: { protocol: 1 },
-        url: "/api/v1/room-connections",
-      });
-      expect(response.statusCode).toBe(201);
-      return roomConnectionOpenResponseSchema.parse(response.json());
-    };
-    const postCommand = async (connectionId: string, command: object) => {
-      const response = await runtime.app.inject({
-        headers,
-        method: "POST",
-        payload: command,
-        url: `/api/v1/room-connections/${connectionId}/commands`,
-      });
-      expect(response.statusCode).toBe(202);
-    };
-    const poll = async (connectionId: string) => {
-      const response = await runtime.app.inject({
-        headers,
-        method: "POST",
-        payload: {},
-        url: `/api/v1/room-connections/${connectionId}/poll`,
-      });
-      expect(response.statusCode).toBe(200);
-      return roomConnectionPollResponseSchema.parse(response.json());
-    };
-
-    const firstRoom = await createRoom("多连接第一房间");
-    const firstConnection = await openConnection();
-    const firstJoinRequestId = ulid();
-    await postCommand(firstConnection.connectionId, {
-      payload: { joinTicket: firstRoom.joinTicket },
-      protocol: 1,
-      requestId: firstJoinRequestId,
-      type: "room.join",
+      },
+      url: "/api/v1/rooms",
     });
-    const firstJoinPoll = await poll(firstConnection.connectionId);
+    expect(roomResponse.statusCode).toBe(201);
+    const firstRoom = roomResponse.json() as { joinTicket: string; roomId: string };
+
+    const openResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: { protocol: 1 },
+      url: "/api/v1/room-connections",
+    });
+    expect(openResponse.statusCode).toBe(201);
+    const firstConnection = roomConnectionOpenResponseSchema.parse(openResponse.json());
+    const firstJoinRequestId = ulid();
+    const commandResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: {
+        payload: { joinTicket: firstRoom.joinTicket },
+        protocol: 1,
+        requestId: firstJoinRequestId,
+        type: "room.join",
+      },
+      url: `/api/v1/room-connections/${firstConnection.connectionId}/commands`,
+    });
+    expect(commandResponse.statusCode).toBe(202);
+    const pollResponse = await runtime.app.inject({
+      headers,
+      method: "POST",
+      payload: {},
+      url: `/api/v1/room-connections/${firstConnection.connectionId}/poll`,
+    });
+    expect(pollResponse.statusCode).toBe(200);
+    const firstJoinPoll = roomConnectionPollResponseSchema.parse(pollResponse.json());
     const firstJoined = firstJoinPoll.messages.find(
       (message) => message.type === "room.snapshot" && message.roomId === firstRoom.roomId,
     );
@@ -495,104 +483,46 @@ describe("RoomConnectionGateway", () => {
     );
     if (firstJoined?.type !== "room.snapshot") throw new Error("第一房间未返回加入快照");
 
-    const secondRoom = await createRoom("多连接第二房间");
-    expect(secondRoom.roomId).not.toBe(firstRoom.roomId);
-    const secondConnection = await openConnection();
-    expect(secondConnection.connectionId).not.toBe(firstConnection.connectionId);
-    const secondJoinRequestId = ulid();
-    await postCommand(secondConnection.connectionId, {
-      payload: { joinTicket: secondRoom.joinTicket },
-      protocol: 1,
-      requestId: secondJoinRequestId,
-      type: "room.join",
+    const secondCookies = await login(runtime, "唯一房间轮询用户", "unique-room-polling-password");
+    const secondHeaders = unsafeHeaders(secondCookies, origin);
+    const secondRoomResponse = await runtime.app.inject({
+      headers: secondHeaders,
+      method: "POST",
+      payload: {
+        gameId: "gomoku",
+        name: "被拒绝的第二房间",
+        practice: false,
+        settings: {
+          moveTimeSeconds: 60,
+          rule: "freestyle",
+          timerEnabled: false,
+          totalTimeMinutes: 10,
+        },
+      },
+      url: "/api/v1/rooms",
     });
-    const secondJoinPoll = await poll(secondConnection.connectionId);
-    const secondJoined = secondJoinPoll.messages.find(
-      (message) => message.type === "room.snapshot" && message.roomId === secondRoom.roomId,
-    );
-    expect(secondJoined).toMatchObject({ roomId: secondRoom.roomId, type: "room.snapshot" });
-    expect(secondJoinPoll.messages).toContainEqual(
-      expect.objectContaining({
-        causedBy: secondJoinRequestId,
-        roomId: secondRoom.roomId,
-        type: "command.ack",
-      }),
-    );
-    expect(
-      secondJoinPoll.messages.every(
-        (message) => !("roomId" in message) || message.roomId === secondRoom.roomId,
-      ),
-    ).toBe(true);
-    if (secondJoined?.type !== "room.snapshot") throw new Error("第二房间未返回加入快照");
-
-    const firstClaimRequestId = ulid();
-    await postCommand(firstConnection.connectionId, {
-      expectedRevision: firstJoined.revision,
-      payload: { seatId: "seat-1" },
-      protocol: 1,
-      requestId: firstClaimRequestId,
-      roomId: firstRoom.roomId,
-      type: "room.seat.claim",
+    expect(secondRoomResponse.statusCode).toBe(409);
+    expect(secondRoomResponse.json()).toMatchObject({
+      error: {
+        code: "CONNECTION_ROOM_CONFLICT",
+        details: { currentRoomId: firstRoom.roomId },
+      },
     });
-    const firstClaimPoll = await poll(firstConnection.connectionId);
-    expect(firstClaimPoll.messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          revision: firstJoined.revision + 1,
-          roomId: firstRoom.roomId,
-          type: "room.snapshot",
-        }),
-        expect.objectContaining({
-          causedBy: firstClaimRequestId,
-          roomId: firstRoom.roomId,
-          type: "command.ack",
-        }),
-      ]),
-    );
-    expect(
-      firstClaimPoll.messages.every(
-        (message) => !("roomId" in message) || message.roomId === firstRoom.roomId,
-      ),
-    ).toBe(true);
 
-    const secondClaimRequestId = ulid();
-    await postCommand(secondConnection.connectionId, {
-      expectedRevision: secondJoined.revision,
-      payload: { seatId: "seat-2" },
-      protocol: 1,
-      requestId: secondClaimRequestId,
-      roomId: secondRoom.roomId,
-      type: "room.seat.claim",
+    const lobbyResponse = await runtime.app.inject({
+      headers: { cookie: secondCookies.header },
+      method: "GET",
+      url: "/api/v1/rooms",
     });
-    const secondClaimPoll = await poll(secondConnection.connectionId);
-    expect(secondClaimPoll.messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          revision: secondJoined.revision + 1,
-          roomId: secondRoom.roomId,
-          type: "room.snapshot",
-        }),
-        expect.objectContaining({
-          causedBy: secondClaimRequestId,
-          roomId: secondRoom.roomId,
-          type: "command.ack",
-        }),
-      ]),
-    );
-    expect(
-      secondClaimPoll.messages.every(
-        (message) => !("roomId" in message) || message.roomId === secondRoom.roomId,
-      ),
-    ).toBe(true);
+    expect(lobbyResponse.statusCode).toBe(200);
+    expect(lobbyResponse.json()).toMatchObject({ currentRoomId: firstRoom.roomId });
 
-    for (const connection of [firstConnection, secondConnection]) {
-      const response = await runtime.app.inject({
-        headers,
-        method: "DELETE",
-        url: `/api/v1/room-connections/${connection.connectionId}`,
-      });
-      expect(response.statusCode).toBe(204);
-    }
+    const closedResponse = await runtime.app.inject({
+      headers,
+      method: "DELETE",
+      url: `/api/v1/room-connections/${firstConnection.connectionId}`,
+    });
+    expect(closedResponse.statusCode).toBe(204);
   }, 30_000);
 
   it("requires a session, same-origin request and CSRF token for long polling", async () => {
@@ -1177,9 +1107,13 @@ describe("RoomConnectionGateway", () => {
       },
       url: "/api/v1/rooms",
     });
-    expect(additionalRoomResponse.statusCode).toBe(201);
-    const additionalRoom = additionalRoomResponse.json() as { roomId: string };
-    expect(additionalRoom.roomId).not.toBe(created.roomId);
+    expect(additionalRoomResponse.statusCode).toBe(409);
+    expect(additionalRoomResponse.json()).toMatchObject({
+      error: {
+        code: "CONNECTION_ROOM_CONFLICT",
+        details: { currentRoomId: created.roomId },
+      },
+    });
 
     const startedView = started.payload.gameView as {
       readonly players: readonly { readonly color: string; readonly seatId: string }[];
@@ -1218,9 +1152,12 @@ describe("RoomConnectionGateway", () => {
       url: "/api/v1/rooms?gameId=gomoku",
     });
     expect(lobbyResponse.statusCode).toBe(200);
-    const lobbyRooms = (lobbyResponse.json() as { rooms: Record<string, unknown>[] }).rooms;
-    expect(lobbyRooms.find(({ roomId }) => roomId === created.roomId)).toMatchObject({
-      resumeAvailable: true,
+    const lobby = lobbyResponse.json() as {
+      currentRoomId: string | null;
+      rooms: Record<string, unknown>[];
+    };
+    expect(lobby.currentRoomId).toBe(created.roomId);
+    expect(lobby.rooms.find(({ roomId }) => roomId === created.roomId)).toMatchObject({
       roomId: created.roomId,
     });
     const conflictingTicketResponse = await runtime.app.inject({
@@ -1233,7 +1170,7 @@ describe("RoomConnectionGateway", () => {
     expect(conflictingTicketResponse.json()).toMatchObject({
       error: {
         code: "CONNECTION_ROOM_CONFLICT",
-        details: { resumeAvailable: true, roomId: created.roomId },
+        details: { currentRoomId: created.roomId },
       },
     });
 
@@ -1567,8 +1504,12 @@ describe("RoomConnectionGateway", () => {
       role: "admin",
       username: "服务管理员",
     });
+    runtime.repositories.accounts.create({
+      passwordHash: await new PasswordService(1).hash("service-room-password"),
+      username: "服务房主",
+    });
     const gomokuCookies = await login(runtime, "服务管理员", "service-password");
-    const ludoCookies = await login(runtime, "服务管理员", "service-password");
+    const ludoCookies = await login(runtime, "服务房主", "service-room-password");
 
     const gomokuCreated = await runtime.app.inject({
       headers: unsafeHeaders(gomokuCookies, origin),
