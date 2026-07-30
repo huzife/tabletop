@@ -482,6 +482,8 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(createdRooms).toHaveLength(2);
     expect(new Set(createdRooms.map(({ room }) => room.state.roomId)).size).toBe(2);
     expect(registry.listPublicRooms()).toHaveLength(2);
+    expect(registry.listPublicRooms().every((room) => !room.resumeAvailable)).toBe(true);
+    expect(registry.listPublicRooms(session.id).every((room) => room.resumeAvailable)).toBe(true);
     for (const { room } of createdRooms) {
       expect(registry.bindingForSession(session.id, room.state.roomId)).toEqual({
         memberId: room.state.hostMemberId,
@@ -744,8 +746,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     created.room.destroy("host_closed", "测试结束");
   });
 
-  it("keeps the last seated lobby member through reconnect grace and destroys at expiry", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  it("removes the last disconnected lobby member immediately", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers);
     const created = await registry.createRoom({
       account: accounts[0]!,
@@ -768,29 +769,16 @@ describe("RoomRegistry and RoomRuntime", () => {
     );
 
     await created.room.connectionLost(joined.member.memberId, "connection-lobby-host");
-    await vi.advanceTimersByTimeAsync(29_999);
-    await created.room.queue.run(() => undefined);
-
-    expect(created.room.destroyed).toBe(false);
-    expect(joined.member).toMatchObject({ connectionStatus: "reconnecting" });
-    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toEqual({
-      memberId: joined.member.memberId,
-      roomId: created.room.state.roomId,
-    });
-    expect(registry.require(created.room.state.roomId)).toBe(created.room);
-
-    await vi.advanceTimersByTimeAsync(1);
-    await created.room.queue.run(() => undefined);
 
     expect(created.room.destroyed).toBe(true);
+    expect(joined.member).toMatchObject({ connectionStatus: "offline" });
     expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toBeUndefined();
     expect(() => registry.require(created.room.state.roomId)).toThrowError(
       expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
     );
   });
 
-  it("waits for connected and reconnecting lobby members before destroying the room", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  it("removes each disconnected lobby member and synchronizes host transfer", async () => {
     const { accounts, registry, sessions } = createTestRegistry(closers, { accountCount: 2 });
     const created = await registry.createRoom({
       account: accounts[0]!,
@@ -820,36 +808,17 @@ describe("RoomRegistry and RoomRuntime", () => {
     );
 
     await created.room.connectionLost(host.member.memberId, "connection-lobby-host");
-    await vi.advanceTimersByTimeAsync(10_000);
-    await created.room.queue.run(() => undefined);
 
     expect(created.room.destroyed).toBe(false);
+    expect(created.room.state.members.has(host.member.memberId)).toBe(false);
+    expect(created.room.state.hostMemberId).toBe(guest.member.memberId);
     expect(guest.member.connectionStatus).toBe("connected");
+    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toBeUndefined();
 
     await created.room.connectionLost(guest.member.memberId, "connection-lobby-guest");
-    await vi.advanceTimersByTimeAsync(20_000);
-    await created.room.queue.run(() => undefined);
-
-    expect(created.room.destroyed).toBe(false);
-    expect(created.room.state.members.get(host.member.memberId)).toBe(host.member);
-    expect(host.member.connectionStatus).toBe("offline");
-    expect(guest.member.connectionStatus).toBe("reconnecting");
-    expect(registry.bindingForSession(sessions[0]!.id, created.room.state.roomId)).toBeUndefined();
-    expect(registry.bindingForSession(sessions[1]!.id, created.room.state.roomId)).toEqual({
-      memberId: guest.member.memberId,
-      roomId: created.room.state.roomId,
-    });
-
-    await vi.advanceTimersByTimeAsync(9_999);
-    await created.room.queue.run(() => undefined);
-
-    expect(created.room.destroyed).toBe(false);
-    expect(guest.member.connectionStatus).toBe("reconnecting");
-
-    await vi.advanceTimersByTimeAsync(1);
-    await created.room.queue.run(() => undefined);
 
     expect(created.room.destroyed).toBe(true);
+    expect(guest.member.connectionStatus).toBe("offline");
     expect(registry.bindingForSession(sessions[1]!.id, created.room.state.roomId)).toBeUndefined();
     expect(() => registry.require(created.room.state.roomId)).toThrowError(
       expect.objectContaining({ code: "ROOM_NOT_FOUND" }),
@@ -1311,6 +1280,10 @@ describe("RoomRegistry and RoomRuntime", () => {
       kind: "fallback",
       reason: "disconnect",
     });
+    expect(registry.listPublicRooms(loser.session.id)[0]).toMatchObject({
+      resumeAvailable: true,
+      roomId: room.state.roomId,
+    });
 
     await vi.advanceTimersByTimeAsync(0);
     await room.queue.run(() => undefined);
@@ -1318,7 +1291,13 @@ describe("RoomRegistry and RoomRuntime", () => {
     const snapshot = room.projectSnapshot(winner.member.memberId);
     expect(room.state.status).toBe("post_match");
     expect(loser.member).toMatchObject({ connectionStatus: "offline" });
+    expect(room.state.members.has(loser.member.memberId)).toBe(false);
     expect(registry.bindingForSession(loser.session.id)).toBeUndefined();
+    expect(registry.listPublicRooms(loser.session.id)[0]).toMatchObject({
+      resumeAvailable: false,
+      roomId: room.state.roomId,
+    });
+    expect(room.state.seats.find(({ seatId }) => seatId === loser.seatId)?.occupant).toBeNull();
     expect(snapshot.gameView).toMatchObject({
       outcome: { reason: "disconnected", winnerSeatId: winner.seatId },
       phase: "ended",
@@ -1326,7 +1305,38 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(snapshot.displayEvents).toEqual([]);
   });
 
-  it("keeps ludo under persistent AI control after grace expiry and lets the owner reclaim", async () => {
+  it("treats a manual departure during play as reconnectable connection loss", async () => {
+    const { players, registry, room } = await createStartedRealGameRoom(closers, {
+      gameId: "gomoku",
+      seatIds: ["seat-1", "seat-2"],
+      settings: {
+        moveTimeSeconds: 60,
+        rule: "freestyle",
+        timerEnabled: false,
+        totalTimeMinutes: 10,
+      },
+    });
+    const departing = players[0]!;
+
+    await room.departConnection(departing.member.memberId, departing.connectionId);
+
+    expect(departing.member.connectionStatus).toBe("reconnecting");
+    expect(room.state.members.has(departing.member.memberId)).toBe(true);
+    expect(registry.bindingForSession(departing.session.id, room.state.roomId)).toBeDefined();
+    expect(registry.listPublicRooms(departing.session.id)[0]).toMatchObject({
+      resumeAvailable: true,
+      roomId: room.state.roomId,
+    });
+
+    await room.resume(
+      departing.member.memberId,
+      sessionIdSchema.parse(departing.session.id),
+      "connection-returned",
+    );
+    expect(departing.member.connectionStatus).toBe("connected");
+  });
+
+  it("removes an expired ludo member and keeps non-reclaimable AI control", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     const { players, registry, room } = await createStartedRealGameRoom(closers, {
       gameId: "ludo",
@@ -1361,10 +1371,11 @@ describe("RoomRegistry and RoomRuntime", () => {
       }[];
     };
     expect(disconnected.member.connectionStatus).toBe("offline");
+    expect(room.state.members.has(disconnected.member.memberId)).toBe(false);
     expect(registry.bindingForSession(disconnected.session.id)).toBeUndefined();
     expect(expiredView.seats.find(({ seatId }) => seatId === disconnected.seatId)).toMatchObject({
       controller: "persistent_ai",
-      reclaimable: true,
+      reclaimable: false,
     });
 
     const rejoinTicket = await registry.issueListJoinTicket({
@@ -1376,7 +1387,7 @@ describe("RoomRegistry and RoomRuntime", () => {
       disconnected.account,
       disconnected.session,
     );
-    expect(rejoined.member.memberId).toBe(disconnected.member.memberId);
+    expect(rejoined.member.memberId).not.toBe(disconnected.member.memberId);
     expect(
       [...room.state.members.values()].filter(
         ({ accountId }) => accountId === disconnected.account.id,
@@ -1385,31 +1396,19 @@ describe("RoomRegistry and RoomRuntime", () => {
     await room.attachConnection(rejoined.member.memberId, "connection-rejoined");
 
     const beforeReclaim = room.projectSnapshot(rejoined.member.memberId);
-    expect(beforeReclaim.permissions.reclaimableSeatIds).toEqual([disconnected.seatId]);
-    await room.reclaimSeat(rejoined.member.memberId, disconnected.seatId, room.state.revision);
-
-    const reclaimed = room.projectSnapshot(rejoined.member.memberId);
-    const reclaimedView = reclaimed.gameView as {
-      readonly seats: readonly {
-        readonly controller: string;
-        readonly reclaimable: boolean;
-        readonly seatId: string;
-      }[];
-    };
+    expect(beforeReclaim.permissions.reclaimableSeatIds).toEqual([]);
+    await expect(
+      room.reclaimSeat(rejoined.member.memberId, disconnected.seatId, room.state.revision),
+    ).rejects.toMatchObject({ code: "ROOM_PERMISSION_DENIED" });
     expect(room.state.seats.find(({ seatId }) => seatId === disconnected.seatId)).toMatchObject({
-      controller: { kind: "human" },
+      controller: { kind: "fallback", reason: "disconnect" },
       occupant: {
         accountId: disconnected.account.id,
-        memberId: rejoined.member.memberId,
+        memberId: disconnected.member.memberId,
       },
       reclaimable: false,
     });
-    expect(reclaimedView.seats.find(({ seatId }) => seatId === disconnected.seatId)).toMatchObject({
-      controller: "human",
-      reclaimable: false,
-    });
-    expect(reclaimed.permissions.canSubmitGameAction).toBe(true);
-    expect(reclaimed.permissions.reclaimableSeatIds).toEqual([]);
+    expect(beforeReclaim.permissions.canSubmitGameAction).toBe(false);
   });
 
   it("removes a seatless spectator after grace expiry so the spectator slot is reusable", async () => {
@@ -1569,6 +1568,14 @@ describe("RoomRegistry and RoomRuntime", () => {
     });
     const guest = await registry.consumeJoinTicket(guestTicket.token, accounts[1]!, sessions[1]!);
     await created.room.attachConnection(guest.member.memberId, "connection-reconnecting-guest");
+    await created.room.claimSeat(
+      guest.member.memberId,
+      seatIdSchema.parse("seat-2"),
+      created.room.state.revision,
+    );
+    await created.room.setReady(host.member.memberId, true, created.room.state.revision);
+    await created.room.setReady(guest.member.memberId, true, created.room.state.revision);
+    await created.room.startMatch(host.member.memberId, created.room.state.revision);
     vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     await created.room.connectionLost(guest.member.memberId, "connection-reconnecting-guest");
     await created.room.connectionLost(
@@ -1580,8 +1587,9 @@ describe("RoomRegistry and RoomRuntime", () => {
     await created.room.queue.run(() => undefined);
     expect(created.room.destroyed).toBe(false);
     expect(host.member.connectionStatus).toBe("offline");
+    expect(created.room.state.members.has(host.member.memberId)).toBe(false);
     expect(guest.member.connectionStatus).toBe("reconnecting");
-    expect(created.room.state.hostMemberId).toBe(host.member.memberId);
+    expect(created.room.state.hostMemberId).toBe(guest.member.memberId);
 
     await created.room.attachConnection(guest.member.memberId, "connection-late-guest");
 
@@ -1589,7 +1597,7 @@ describe("RoomRegistry and RoomRuntime", () => {
     expect(created.room.projectSnapshot(guest.member.memberId).permissions).toMatchObject({
       canRenameRoom: true,
       canTransferHost: true,
-      canUpdateSettings: true,
+      canUpdateSettings: false,
     });
     created.room.destroy("host_closed", "测试结束");
   });

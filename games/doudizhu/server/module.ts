@@ -152,10 +152,10 @@ function applySystemEvent(
     case "connection.grace_expired":
       if (seat.controller !== "human") return { kind: "noop", state: next };
       seat.controller = "persistent_ai";
-      seat.reclaimable = true;
+      seat.reclaimable = false;
       directives.push(
         { type: "seat.useFallbackController", seatId: event.seatId },
-        { type: "seat.setReclaimable", seatId: event.seatId, reclaimable: true },
+        { type: "seat.setReclaimable", seatId: event.seatId, reclaimable: false },
       );
       break;
     case "seat.reclaim_requested":

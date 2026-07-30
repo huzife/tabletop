@@ -94,7 +94,7 @@ describe("ludo automation and connection policy", () => {
     expect(restored.roomDirectives).toEqual([{ type: "seat.returnHumanControl", seatId: "red" }]);
   });
 
-  it("keeps persistent AI reclaimable only by the platform-validated owner", () => {
+  it("makes persistent AI non-reclaimable after reconnect expiry", () => {
     const state = createTwoPlayerState();
     const lost = ludoServerModule.handleSystemEvent(createTestSystemEventContextV1(), state, {
       type: "connection.lost",
@@ -113,24 +113,9 @@ describe("ludo automation and connection policy", () => {
     if (expired.kind !== "applied") throw new Error("expected expiry transition");
     expect(requireSeat(expired.state, LUDO_SEAT_IDS.red)).toMatchObject({
       controller: "persistent_ai",
-      reclaimable: true,
-    });
-
-    const reclaimed = ludoServerModule.handleSystemEvent(
-      createTestSystemEventContextV1(),
-      expired.state,
-      {
-        type: "seat.reclaim_requested",
-        seatId: LUDO_SEAT_IDS.red,
-      },
-    );
-    if (reclaimed.kind !== "applied") throw new Error("expected reclaim transition");
-    expect(requireSeat(reclaimed.state, LUDO_SEAT_IDS.red)).toMatchObject({
-      controller: "human",
       reclaimable: false,
     });
-    expect(reclaimed.roomDirectives).toEqual([
-      { type: "seat.returnHumanControl", seatId: "red" },
+    expect(expired.roomDirectives).toEqual([
       { type: "seat.setReclaimable", seatId: "red", reclaimable: false },
     ]);
   });

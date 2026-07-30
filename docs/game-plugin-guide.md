@@ -215,13 +215,13 @@ interface GameOutcomeV1 {
 
 ![图7-1 插件在房间中的生命周期](images/plugin-fig02.png)
 
-创建房间时只校验设置，不创建游戏状态。所有座位满足开始条件且房主开始后，宿主调用 `createMatch`。结束状态由插件结果产生，但房间继续存在；再次准备后创建全新 `matchId` 和状态。关闭服务或最后真人离开会销毁房间；单次插件命令异常由网关返回内部错误，当前不会自动销毁房间。
+创建房间时只校验设置，不创建游戏状态。所有座位满足开始条件且房主开始后，宿主调用 `createMatch`。结束状态由插件结果产生，但房间继续存在；再次准备后创建全新 `matchId` 和状态。非对局阶段成员断开会立即移除；对局阶段最后一个 `connected` 或 `reconnecting` 成员退出后会销毁房间。关闭服务也会销毁房间；单次插件命令异常由网关返回内部错误，当前不会自动销毁房间。
 
 插件不能依赖完整上局状态。需要在再来一局中使用上局公开信息时，房间通过 `CreateMatchContextV1.previousSummary` 提供前一 `matchId` 和插件上次 outcome 写入的可选 `publicSummary`；它不提供完整旧状态。
 
 ### 7.1 连接与成员系统事件
 
-平台只负责识别物理连接变化和维护 30 秒恢复窗口，不决定这些变化对比赛的含义。房间队列在确定顺序点调用 `handleSystemEvent`，当前 v1 事件类型为：
+平台在非对局阶段直接清理离开的成员，只在对局阶段维护 30 秒恢复窗口，不决定连接变化对比赛的含义。手动退出、页面离开和物理断线在对局中都先表现为 `connection.lost`。房间队列在确定顺序点调用 `handleSystemEvent`，当前 v1 事件类型为：
 
 ```ts
 type GameSystemEventV1 =
@@ -238,11 +238,11 @@ type GameRoomDirectiveV1 =
   | { type: "seat.setReclaimable"; seatId: SeatId; reclaimable: boolean };
 ```
 
-事件只描述平台事实，指令只描述平台能够执行的通用房间变化。插件通过 `outcome` 决定是否结束比赛，通过 `roomDirectives` 决定控制器和座位策略。具体游戏必须在自己的文档中说明每个事件返回什么；平台核心不得根据 `gameId` 补充默认结局。
+事件只描述平台事实，指令只描述平台能够执行的通用房间变化。插件通过 `outcome` 决定是否结束比赛，通过 `roomDirectives` 决定控制器和座位策略。`connection.grace_expired` 处理完成后平台总会移除成员、释放恢复绑定并清除座位取回权限；插件只能决定退出后的比赛结果、自动控制或座位释放。具体游戏必须在自己的文档中说明每个事件返回什么；平台核心不得根据 `gameId` 补充默认结局。
 
 `connection.restored` 只表示原会话在窗口内通过验证。插件可以返回真人控制，也可以因为比赛已经结束而不返回指令。任何已提交的自动动作都不会由平台自动回滚。
 
-`connection.lost.graceDeadlineMs` 是 30 秒窗口结束的 UTC Unix 毫秒时间。窗口到期后的无座观众清理、同会话成员复用和在线房主转移由平台统一完成，不属于插件指令；插件只决定比赛 outcome、座位 controller、释放和可取回状态。
+`connection.lost.graceDeadlineMs` 是 30 秒窗口结束的 UTC Unix 毫秒时间。窗口到期后的成员删除、绑定释放和房主转移由平台统一完成，不属于插件指令；插件只决定比赛 outcome、座位 controller 和座位释放。到期退出的座位不得设置为可取回。
 
 ## 8. 随机数与时间
 

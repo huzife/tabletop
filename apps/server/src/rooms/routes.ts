@@ -42,10 +42,10 @@ export async function registerRoomRoutes(
   });
 
   app.get("/api/v1/rooms", async (request, reply) => {
-    requireSession(auth, request);
+    const identity = requireSession(auth, request);
     const query = roomListQuerySchema.parse(request.query);
     const roomsResponse = rooms
-      .listPublicRooms()
+      .listPublicRooms(identity.session.id)
       .filter((room) => (query.gameId ? room.gameId === query.gameId : true))
       .filter((room) => (query.status ? room.status === query.status : true))
       .filter((room) => (query.joinable === undefined ? true : room.joinable === query.joinable));

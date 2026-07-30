@@ -29,6 +29,7 @@ export const roomSummarySchema = z.strictObject({
   maxSpectators: z.number().int().nonnegative(),
   hasPassword: z.boolean(),
   joinable: z.boolean(),
+  resumeAvailable: z.boolean(),
 });
 
 export const roomListQuerySchema = z.strictObject({

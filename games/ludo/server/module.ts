@@ -160,8 +160,8 @@ function applySystemEvent(
     case "connection.grace_expired":
       if (mutableSeat.controller !== "temporary_ai") return { kind: "noop", state: next };
       mutableSeat.controller = "persistent_ai";
-      mutableSeat.reclaimable = true;
-      directives.push({ type: "seat.setReclaimable", seatId: event.seatId, reclaimable: true });
+      mutableSeat.reclaimable = false;
+      directives.push({ type: "seat.setReclaimable", seatId: event.seatId, reclaimable: false });
       break;
     case "seat.reclaim_requested":
       if (mutableSeat.controller !== "persistent_ai" || !mutableSeat.reclaimable) {

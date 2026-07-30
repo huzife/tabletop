@@ -257,10 +257,7 @@ export class RoomConnectionGateway implements RoomPublisher {
       const connectionId = readConnectionId(request.params);
       const connection = this.#connections.get(connectionId);
       if (connection === undefined) return reply.code(204).send();
-      if (
-        connection.kind !== "long-polling" ||
-        connection.identity.session.id !== identity.session.id
-      ) {
+      if (connection.identity.session.id !== identity.session.id) {
         throw new HttpError(403, "ROOM_PERMISSION_DENIED", "当前会话不能关闭该房间连接");
       }
       this.#closeConnection(connection, 1000, "页面已离开");
@@ -550,7 +547,7 @@ export class RoomConnectionGateway implements RoomPublisher {
     let stateChanged = true;
     switch (command.type) {
       case "room.leave":
-        await room.leave(memberId);
+        await room.departConnection(memberId, connection.connectionId);
         delete connection.memberId;
         delete connection.roomId;
         break;

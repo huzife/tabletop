@@ -166,7 +166,7 @@ describe("doudizhu match", () => {
     ]);
   });
 
-  it("waits through connection loss and hands control to reclaimable AI at grace expiry", () => {
+  it("waits through connection loss and hands control to non-reclaimable AI at grace expiry", () => {
     const state = reachPlaying();
     const lost = doudizhuServerModule.handleSystemEvent(createTestSystemEventContextV1(), state, {
       type: "connection.lost",
@@ -184,11 +184,11 @@ describe("doudizhu match", () => {
     if (expired.kind !== "applied") throw new Error("expected takeover");
     expect(expired.state.seats.find(({ seatId }) => seatId === seat1)).toMatchObject({
       controller: "persistent_ai",
-      reclaimable: true,
+      reclaimable: false,
     });
     expect(expired.roomDirectives).toEqual([
       { type: "seat.useFallbackController", seatId: seat1 },
-      { type: "seat.setReclaimable", seatId: seat1, reclaimable: true },
+      { type: "seat.setReclaimable", seatId: seat1, reclaimable: false },
     ]);
   });
 });

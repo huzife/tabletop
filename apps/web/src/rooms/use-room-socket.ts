@@ -4,6 +4,7 @@ import {
   roomIdSchema,
   serverMessageSchema,
   type ClientCommand,
+  type ConnectionId,
   type ConnectionPingCommand,
   type GameTransientCommand,
   type JsonObject,
@@ -17,6 +18,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { webGameRegistry } from "../games/registry";
+import { roomConnectionApi } from "../api/client";
 import { consumeStoredJoinTicket } from "./entry-context";
 import { RoomLongPollingTransport, type LongPollingTransportClose } from "./long-polling-transport";
 
@@ -163,6 +165,7 @@ export function useRoomSocket(
     let polling: RoomLongPollingTransport | null = null;
     let preferLongPolling = false;
     let currentTransportHadSnapshot = false;
+    let currentConnectionId: ConnectionId | undefined;
     let currentMatchId: MatchId | undefined;
     let currentGameModule: ReturnType<typeof webGameRegistry.get>;
     let currentTransientEvent: ParsedGameTransientEvent | null = null;
@@ -439,6 +442,7 @@ export function useRoomSocket(
 
       switch (message.type) {
         case "connection.ready":
+          currentConnectionId = message.payload.connectionId;
           heartbeatIntervalMs = Math.min(
             60_000,
             Math.max(5_000, message.payload.heartbeatIntervalMs),
@@ -592,6 +596,7 @@ export function useRoomSocket(
     };
 
     const handleTransportClose = (event: LongPollingTransportClose) => {
+      currentConnectionId = undefined;
       clearHeartbeat();
       clearPending();
       clearQueuedTransient();
@@ -839,8 +844,15 @@ export function useRoomSocket(
       if (isWebSocketOpen()) scheduleWebSocketHeartbeat();
       else connect();
     };
+    const handlePageHide = () => {
+      const connectionId = currentConnectionId;
+      if (connectionId !== undefined) {
+        void roomConnectionApi.close(connectionId, true).catch(() => undefined);
+      }
+    };
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online", handleOnline);
+    window.addEventListener("pagehide", handlePageHide);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     connect();
 
@@ -854,6 +866,7 @@ export function useRoomSocket(
       }
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online", handleOnline);
+      window.removeEventListener("pagehide", handlePageHide);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearReconnectExpiry();
       clearWebSocketEstablishTimer();

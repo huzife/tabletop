@@ -12,31 +12,38 @@ participant "Game Host / 插件" as Host
 participant "Deadline Scheduler" as Scheduler
 participant "可选兜底控制器" as Fallback
 
+玩家 -> 浏览器 : 离开、刷新、关闭或网络中断
+浏览器 -> Gateway : pagehide keepalive 关闭（尽力）
 Gateway -x 浏览器 : 活动房间传输断开
 Gateway -> Queue : connection.lost(sessionId)
-Queue -> Scheduler : schedule(+30s, recoveryId)
-Queue -> Host : systemEvent(connection.lost)
-Host --> Queue : 可选 seat.useFallbackController
 
-opt 插件启用临时控制
-  Queue -> Fallback : chooseAction(view, revision, deadline)
-  Fallback --> Queue : game.action
-  Queue -> Host : 正常动作校验与迁移
+alt 非对局阶段
+  Queue -> Queue : 删除成员并释放绑定
+  Queue --> Gateway : room.snapshot
+else 对局进行中
+  Queue -> Scheduler : schedule(+30s, recoveryId)
+  Queue -> Host : systemEvent(connection.lost)
+  Host --> Queue : 可选 seat.useFallbackController
+
+  opt 插件启用临时控制
+    Queue -> Fallback : chooseAction(view, revision, deadline)
+    Fallback --> Queue : game.action
+    Queue -> Host : 正常动作校验与迁移
+  end
+
+  alt 30 秒内重新进入
+    玩家 -> 浏览器 : 大厅点击“重新进入”
+    浏览器 -> Gateway : 新连接 + room.resume(roomId)
+    Gateway -> Queue : resume(sessionId, recoveryId)
+    Queue -> Scheduler : cancel(recoveryId)
+    Queue -> Host : systemEvent(connection.restored)
+    Host --> Queue : 新状态 + 通用房间指令
+    Queue --> 浏览器 : room.snapshot\n最新 revision，无历史动画重放
+  else 窗口到期
+    Scheduler -> Queue : reconnect.deadline
+    Queue -> Host : systemEvent(connection.grace_expired)
+    Host --> Queue : 比赛结果或自动控制指令
+    Queue -> Queue : 删除成员、释放绑定、禁止取回
+  end
 end
-
-玩家 -> 浏览器 : 网络恢复
-浏览器 -> Gateway : 新 WebSocket 或长轮询 + 会话 Cookie
-Gateway --> 浏览器 : connection.ready
-浏览器 -> Gateway : room.resume(roomId)
-Gateway -> Queue : resume(sessionId, recoveryId)
-Queue -> Scheduler : cancel(recoveryId)
-Queue -> Host : systemEvent(connection.restored)
-Host --> Queue : 新状态 + 通用房间指令
-Queue --> 浏览器 : room.snapshot\n最新 revision，无历史动画重放
-
-note over Queue,Host
-  若 30 秒窗口到期，队列提交
-  connection.grace_expired。比赛结果、控制器
-  和座位策略完全由插件转换结果定义。
-end note
 @enduml

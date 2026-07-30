@@ -36,6 +36,14 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
         state: { joinTicket: ticket.joinTicket },
       });
     } catch (error) {
+      if (
+        error instanceof ApiClientError &&
+        error.code === "CONNECTION_ROOM_CONFLICT" &&
+        error.details.resumeAvailable === true
+      ) {
+        navigate(`/rooms/${room.roomId}`);
+        return;
+      }
       setJoinError({
         roomId: room.roomId,
         message: error instanceof ApiClientError ? error.message : "暂时无法进入房间",
@@ -47,6 +55,10 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
 
   function requestEntry(room: RoomSummary) {
     setJoinError(undefined);
+    if (room.resumeAvailable) {
+      navigate(`/rooms/${room.roomId}`);
+      return;
+    }
     if (room.hasPassword) {
       setPassword("");
       setPasswordRoomId(room.roomId);
@@ -107,7 +119,7 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
                 </Badge>
               </td>
               <td>
-                {passwordRoomId === room.roomId ? (
+                {passwordRoomId === room.roomId && !room.resumeAvailable ? (
                   <form
                     className="form-stack form-stack--compact"
                     onSubmit={(event) => submitPassword(event, room)}
@@ -145,9 +157,11 @@ export function RoomList({ rooms }: { rooms: readonly RoomSummary[] }) {
                     >
                       {joiningRoomId === room.roomId
                         ? "正在进入"
-                        : room.status === "playing"
-                          ? "观战"
-                          : "进入"}
+                        : room.resumeAvailable
+                          ? "重新进入"
+                          : room.status === "playing"
+                            ? "观战"
+                            : "进入"}
                     </Button>
                     {joinError?.roomId === room.roomId ? (
                       <span className="ui-field__error" role="alert">

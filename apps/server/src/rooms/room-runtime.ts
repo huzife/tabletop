@@ -120,19 +120,18 @@ export class RoomRuntime {
         return;
       }
 
-      delete member.connectionId;
-      member.connectionStatus = "reconnecting";
-      member.reconnectUntil = now + RECONNECT_GRACE_MS;
-      const seat = this.#seatForMember(memberId);
-      const events = seat
-        ? this.#handleSystemEvent({
-            type: "connection.lost",
-            seatId: seat.seatId,
-            graceDeadlineMs: member.reconnectUntil,
-          })
-        : [];
-      this.#scheduleReconnectExpiry(member);
-      this.#changed(events);
+      this.#disconnectOrRemoveMember(member, now);
+    });
+  }
+
+  departConnection(memberId: MemberId, connectionId: string, now = Date.now()): Promise<void> {
+    return this.queue.run(() => {
+      const member = this.#requireMember(memberId);
+      if (member.connectionId !== connectionId) {
+        return;
+      }
+
+      this.#disconnectOrRemoveMember(member, now);
     });
   }
 
@@ -180,29 +179,7 @@ export class RoomRuntime {
       const events = seat
         ? this.#handleSystemEvent({ type: "member.left", seatId: seat.seatId })
         : [];
-      this.#clearReconnectTimer(memberId);
-      this.state.members.delete(memberId);
-      this.#hooks.onMemberRemoved(member);
-
-      if (seat && seat.controller?.kind === "human") {
-        seat.occupant = null;
-        seat.controller = null;
-        seat.reclaimable = false;
-      }
-
-      if (this.#destroyEmptySoloPracticeRoom()) {
-        return;
-      }
-
-      if (!this.#hasActiveMember()) {
-        this.destroy("last_human_left", "最后一名真人已离开房间");
-        return;
-      }
-
-      if (this.state.hostMemberId === memberId) {
-        this.#transferHostToEarliestMember();
-      }
-      this.#changed(events);
+      this.#removeDepartedMember(member, events);
     });
   }
 
@@ -724,6 +701,11 @@ export class RoomRuntime {
       for (const seat of this.state.seats) {
         if (seat.occupant?.kind === "human") {
           seat.occupant.ready = false;
+          if (!this.state.members.has(seat.occupant.memberId)) {
+            seat.occupant = null;
+            seat.controller = null;
+            seat.reclaimable = false;
+          }
         }
       }
     }
@@ -1035,31 +1017,63 @@ export class RoomRuntime {
                 seatId: seatBeforeEvent.seatId,
               })
             : [];
-          const seatAfterEvent = this.#seatForMember(member.memberId);
-          if (seatAfterEvent?.controller?.kind === "fallback" && this.state.status !== "playing") {
-            seatAfterEvent.controller = { kind: "human" };
-          }
-          this.#hooks.onMemberRemoved(member);
-          if (!seatAfterEvent) {
-            this.state.members.delete(member.memberId);
-          }
-          if (this.#destroyEmptySoloPracticeRoom()) {
-            return;
-          }
-          if (!this.#hasActiveMember()) {
-            this.destroy("last_human_left", "最后一名真人已离开房间");
-            return;
-          }
-          if (this.state.hostMemberId === member.memberId) {
-            this.#transferHostToConnectedMember(member.memberId);
-          }
-          this.#changed(events);
+          this.#removeDepartedMember(member, events);
         });
       },
       Math.max(0, reconnectUntil - Date.now()),
     );
     timer.unref();
     this.#reconnectTimers.set(member.memberId, timer);
+  }
+
+  #disconnectOrRemoveMember(member: RoomMemberState, now: number): void {
+    delete member.connectionId;
+    if (this.state.status !== "playing") {
+      member.connectionStatus = "offline";
+      delete member.reconnectUntil;
+      this.#removeDepartedMember(member, []);
+      return;
+    }
+
+    member.connectionStatus = "reconnecting";
+    member.reconnectUntil = now + RECONNECT_GRACE_MS;
+    const seat = this.#seatForMember(member.memberId);
+    const events = seat
+      ? this.#handleSystemEvent({
+          type: "connection.lost",
+          seatId: seat.seatId,
+          graceDeadlineMs: member.reconnectUntil,
+        })
+      : [];
+    this.#scheduleReconnectExpiry(member);
+    this.#changed(events);
+  }
+
+  #removeDepartedMember(member: RoomMemberState, events: readonly JsonValue[]): void {
+    const seat = this.#seatForMember(member.memberId);
+    this.#clearReconnectTimer(member.memberId);
+    this.state.members.delete(member.memberId);
+    this.#hooks.onMemberRemoved(member);
+
+    if (seat) {
+      seat.reclaimable = false;
+      if (seat.controller?.kind === "human" || this.state.status !== "playing") {
+        seat.occupant = null;
+        seat.controller = null;
+      }
+    }
+
+    if (this.#destroyEmptySoloPracticeRoom()) {
+      return;
+    }
+    if (!this.#hasActiveMember()) {
+      this.destroy("last_human_left", "最后一名真人已离开房间");
+      return;
+    }
+    if (this.state.hostMemberId === member.memberId) {
+      this.#transferHostToEarliestMember();
+    }
+    this.#changed(events);
   }
 
   #permissionsFor(member: RoomMemberState) {
@@ -1138,16 +1152,6 @@ export class RoomRuntime {
       throw new Error("房间没有可转移的房主");
     }
     this.state.hostMemberId = nextHost.memberId;
-  }
-
-  #transferHostToConnectedMember(excludedMemberId: MemberId): void {
-    const candidates = [...this.state.members.values()]
-      .filter((member) => member.memberId !== excludedMemberId)
-      .sort((left, right) => left.joinedAt - right.joinedAt);
-    const nextHost =
-      candidates.find((member) => member.connectionStatus === "connected") ??
-      (this.state.members.has(excludedMemberId) ? undefined : candidates[0]);
-    if (nextHost) this.state.hostMemberId = nextHost.memberId;
   }
 
   #transferOfflineHostToConnectedMember(): void {

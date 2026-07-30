@@ -146,6 +146,30 @@ describe("useRoomSocket", () => {
     view.unmount();
   });
 
+  it("notifies the server when the page is hidden for navigation or refresh", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      value: fetchMock,
+      writable: true,
+    });
+    const view = render(<Harness />);
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket?.serverReady());
+    act(() => socket?.serverMessage(roomSnapshotMessage()));
+    await waitFor(() => expect(latest?.connectionStatus).toBe("connected"));
+
+    act(() => window.dispatchEvent(new Event("pagehide")));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/room-connections/connection-test",
+        expect.objectContaining({ keepalive: true, method: "DELETE" }),
+      ),
+    );
+    view.unmount();
+  });
+
   it("falls back to HTTP long polling when the initial WebSocket handshake fails", async () => {
     const { commands } = installLongPollingFetch();
 

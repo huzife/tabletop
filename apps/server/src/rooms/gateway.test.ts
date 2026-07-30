@@ -778,7 +778,7 @@ describe("RoomConnectionGateway", () => {
     expect(socket.readyState).toBe(WebSocket.OPEN);
   });
 
-  it("acknowledges join, resume and non-final leave while deduplicating entry commands", async () => {
+  it("cleans a disconnected lobby member and allows a fresh join without stale binding", async () => {
     const { origin, runtime, wsUrl } = await startTestRuntime(cleanups);
     const passwordHash = await new PasswordService(1).hash("entry-ack-password");
     const hostAccount = runtime.repositories.accounts.create({
@@ -876,32 +876,37 @@ describe("RoomConnectionGateway", () => {
       revision: guestJoined.revision,
     });
 
-    const reconnectingPromise = waitForSnapshot(hostSocket, created.roomId, (message) =>
-      message.payload.members.some(
-        (member) =>
-          member.accountId === guestAccount.id && member.connectionStatus === "reconnecting",
-      ),
+    const removedPromise = waitForSnapshot(hostSocket, created.roomId, (message) =>
+      message.payload.members.every((member) => member.accountId !== guestAccount.id),
     );
     const guestClosedPromise = once(guestSocket, "close");
     guestSocket.close();
     await guestClosedPromise;
-    await reconnectingPromise;
+    await removedPromise;
 
-    const resumedSocket = await openSocket(wsUrl, origin, guestCookies, cleanups);
-    const resumeRequestId = ulid();
-    const resumeSnapshotPromise = waitForSnapshot(resumedSocket, created.roomId);
-    const resumeAckPromise = waitForCommandAck(resumedSocket, resumeRequestId);
-    send(resumedSocket, {
-      payload: { roomId: created.roomId },
-      protocol: 1,
-      requestId: resumeRequestId,
-      type: "room.resume",
+    const freshTicketResponse = await runtime.app.inject({
+      headers: unsafeHeaders(guestCookies, origin),
+      method: "POST",
+      payload: {},
+      url: `/api/v1/rooms/${created.roomId}/join-ticket`,
     });
-    const [resumed, resumeAck] = await Promise.all([resumeSnapshotPromise, resumeAckPromise]);
-    expect(resumeAck).toMatchObject({
-      causedBy: resumeRequestId,
+    expect(freshTicketResponse.statusCode).toBe(200);
+    const freshTicket = freshTicketResponse.json() as { joinTicket: string };
+    const rejoinedSocket = await openSocket(wsUrl, origin, guestCookies, cleanups);
+    const rejoinRequestId = ulid();
+    const rejoinSnapshotPromise = waitForSnapshot(rejoinedSocket, created.roomId);
+    const rejoinAckPromise = waitForCommandAck(rejoinedSocket, rejoinRequestId);
+    send(rejoinedSocket, {
+      payload: { joinTicket: freshTicket.joinTicket },
+      protocol: 1,
+      requestId: rejoinRequestId,
+      type: "room.join",
+    });
+    const [rejoined, rejoinAck] = await Promise.all([rejoinSnapshotPromise, rejoinAckPromise]);
+    expect(rejoinAck).toMatchObject({
+      causedBy: rejoinRequestId,
       payload: { stateChanged: true },
-      revision: resumed.revision,
+      revision: rejoined.revision,
       roomId: created.roomId,
     });
 
@@ -909,8 +914,8 @@ describe("RoomConnectionGateway", () => {
     const hostAfterLeavePromise = waitForSnapshot(hostSocket, created.roomId, (message) =>
       message.payload.members.every((member) => member.accountId !== guestAccount.id),
     );
-    const leaveAckPromise = waitForCommandAck(resumedSocket, leaveRequestId);
-    send(resumedSocket, {
+    const leaveAckPromise = waitForCommandAck(rejoinedSocket, leaveRequestId);
+    send(rejoinedSocket, {
       payload: {},
       protocol: 1,
       requestId: leaveRequestId,
@@ -924,7 +929,7 @@ describe("RoomConnectionGateway", () => {
       revision: hostAfterLeave.revision,
       roomId: created.roomId,
     });
-    expect(resumedSocket.readyState).toBe(WebSocket.OPEN);
+    expect(rejoinedSocket.readyState).toBe(WebSocket.OPEN);
   }, 30_000);
 
   it("closes established sockets after logout, password rotation or session expiry", async () => {
@@ -1206,6 +1211,31 @@ describe("RoomConnectionGateway", () => {
     inactiveSocket.close();
     await inactiveClosed;
     const lost = await connectionLost;
+
+    const lobbyResponse = await runtime.app.inject({
+      headers: { cookie: inactiveCookies.header },
+      method: "GET",
+      url: "/api/v1/rooms?gameId=gomoku",
+    });
+    expect(lobbyResponse.statusCode).toBe(200);
+    const lobbyRooms = (lobbyResponse.json() as { rooms: Record<string, unknown>[] }).rooms;
+    expect(lobbyRooms.find(({ roomId }) => roomId === created.roomId)).toMatchObject({
+      resumeAvailable: true,
+      roomId: created.roomId,
+    });
+    const conflictingTicketResponse = await runtime.app.inject({
+      headers: unsafeHeaders(inactiveCookies, origin),
+      method: "POST",
+      payload: {},
+      url: `/api/v1/rooms/${created.roomId}/join-ticket`,
+    });
+    expect(conflictingTicketResponse.statusCode).toBe(409);
+    expect(conflictingTicketResponse.json()).toMatchObject({
+      error: {
+        code: "CONNECTION_ROOM_CONFLICT",
+        details: { resumeAvailable: true, roomId: created.roomId },
+      },
+    });
 
     const fallbackMoved = waitForSnapshot(
       activeSocket,

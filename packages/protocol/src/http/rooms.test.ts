@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createRoomRequestSchema,
+  roomSummarySchema,
   roomConnectionOpenRequestSchema,
   roomConnectionOpenResponseSchema,
   roomConnectionPollResponseSchema,
@@ -30,6 +31,25 @@ describe("room HTTP schemas", () => {
         practice: false,
       }),
     ).toThrow();
+  });
+
+  it("exposes whether the current session can resume a room", () => {
+    expect(
+      roomSummarySchema.parse({
+        gameId: "gomoku",
+        hasPassword: false,
+        hostName: "测试房主",
+        joinable: true,
+        maxPlayers: 2,
+        maxSpectators: 10,
+        name: "测试房间",
+        occupiedSeats: 2,
+        resumeAvailable: true,
+        roomId: "room-test",
+        spectatorCount: 0,
+        status: "playing",
+      }),
+    ).toMatchObject({ resumeAvailable: true });
   });
 
   it("validates long-polling connection responses with protocol messages", () => {
