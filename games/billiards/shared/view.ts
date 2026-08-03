@@ -201,6 +201,7 @@ export const billiardsViewSchema = z.strictObject({
     .min(MIN_BILLIARDS_SHOT_POWER)
     .max(MAX_BILLIARDS_SHOT_POWER)
     .default(DEFAULT_FIXED_SHOT_POWER),
+  fixedShotPowerEnabled: z.boolean().default(false),
   legalActions: z.strictObject({
     canChooseDecidingBlack: z.boolean(),
     canChooseGroup: z.boolean(),

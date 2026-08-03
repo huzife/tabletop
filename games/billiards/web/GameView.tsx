@@ -167,14 +167,15 @@ export function BilliardsGameView({
   const balls = animatedBalls ?? view.balls;
   const pendingDecision = view.pendingDecision ?? null;
   const opponentAim = opponentAimPreview(view, transientEvent, isAnimating);
-  const selectedPower = view.breakShot ? power : view.fixedShotPower;
+  const powerLocked = view.fixedShotPowerEnabled && !view.breakShot;
+  const selectedPower = powerLocked ? view.fixedShotPower : power;
   const localAim =
     controlsShotNumber === view.shotNumber
       ? { angle, elevation, power: selectedPower, tip }
       : {
           angle: defaultAimAngle(view),
           elevation: 0,
-          power: view.breakShot ? 58 : view.fixedShotPower,
+          power: powerLocked ? view.fixedShotPower : 58,
           tip: { x: 0, y: 0 },
         };
   const displayedAim =
@@ -182,7 +183,7 @@ export function BilliardsGameView({
       ? localAim
       : {
           ...opponentAim,
-          power: view.breakShot ? opponentAim.power : view.fixedShotPower,
+          power: powerLocked ? view.fixedShotPower : opponentAim.power,
         };
 
   useAimPreviewBroadcast({
@@ -307,9 +308,9 @@ export function BilliardsGameView({
                 </div>
               ) : null}
               <RangeControl
-                disabled={shotControlsDisabled || !view.breakShot}
+                disabled={shotControlsDisabled || powerLocked}
                 id="billiards-power"
-                label={view.breakShot ? "力度" : "力度（房间预设）"}
+                label={powerLocked ? "力度（房间预设）" : "力度"}
                 max={MAX_BILLIARDS_SHOT_POWER}
                 min={MIN_BILLIARDS_SHOT_POWER}
                 onChange={setPower}

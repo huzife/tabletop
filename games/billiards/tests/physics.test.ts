@@ -431,7 +431,7 @@ describe("Pooltool-compatible billiards core", () => {
     expect(first.checksum).toBe(simulation.checksum);
     expect(first.stateHash).toBe(simulation.stateHash);
     expect(first.physicsVersion).toBe(coreInfo.physicsVersion);
-    expect(coreInfo.rulesVersion).toBe("tabletop-billiards-rules-v4");
+    expect(coreInfo.rulesVersion).toBe("tabletop-billiards-rules-v5");
     expect(first.paths.map(({ id }) => id)).toEqual(["cue", "one"]);
     expect(first.paths.every(({ points }) => points.length >= 2 && points.length <= 7)).toBe(true);
     expect(first.paths.every(({ points }) => points[0]?.atMs === 0)).toBe(true);

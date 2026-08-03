@@ -160,7 +160,11 @@ function transitionForShot(
   }
 
   const normalizedSettings = billiardsSettings.schema.parse(state.settings);
-  if (!state.breakShot && action.shot.power !== normalizedSettings.fixedShotPower) {
+  if (
+    normalizedSettings.fixedShotPowerEnabled &&
+    !state.breakShot &&
+    action.shot.power !== normalizedSettings.fixedShotPower
+  ) {
     throw new GameRuleError("FIXED_SHOT_POWER_REQUIRED");
   }
   const initialBalls = state.balls.map((ball) => ({ ...ball }));
@@ -325,6 +329,7 @@ export function projectBilliardsView(
     balls: state.balls.map((ball) => ({ ...ball })),
     breakShot: state.breakShot,
     fixedShotPower: normalizedSettings.fixedShotPower,
+    fixedShotPowerEnabled: normalizedSettings.fixedShotPowerEnabled,
     legalActions: {
       canChooseDecidingBlack:
         viewerIsCurrent &&

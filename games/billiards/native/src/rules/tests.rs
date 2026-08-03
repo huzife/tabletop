@@ -11,6 +11,7 @@ fn settings(mode: BilliardsMode) -> BilliardsSettings {
         cloth_sliding_friction: crate::model::DEFAULT_CLOTH_SLIDING_FRICTION,
         cushion_friction: crate::model::DEFAULT_CUSHION_FRICTION,
         fixed_shot_power: crate::model::DEFAULT_FIXED_SHOT_POWER,
+        fixed_shot_power_enabled: false,
         mode,
     }
 }
@@ -136,10 +137,15 @@ fn serde_models_match_the_existing_wire_contract() {
     assert_eq!(value["phase"], "ball_in_hand");
     assert_eq!(value["settings"]["mode"], "chinese-eight-ball");
     assert_eq!(value["settings"]["fixedShotPower"], 100.0);
+    assert_eq!(value["settings"]["fixedShotPowerEnabled"], false);
     value["settings"]
         .as_object_mut()
         .expect("settings object")
         .remove("fixedShotPower");
+    value["settings"]
+        .as_object_mut()
+        .expect("settings object")
+        .remove("fixedShotPowerEnabled");
     let decoded: BilliardsMatchState = serde_json::from_value(value).expect("deserialize state");
     assert_eq!(decoded, match_state);
 }
@@ -565,7 +571,8 @@ fn reducer_requires_simulation_and_applies_place_and_shoot() {
 
 #[test]
 fn reducer_allows_variable_break_power_and_enforces_room_power_afterwards() {
-    let opening = ready_to_shoot(state(BilliardsMode::ChineseEightBall));
+    let mut opening = ready_to_shoot(state(BilliardsMode::ChineseEightBall));
+    opening.settings.fixed_shot_power_enabled = true;
     let mut variable_break_shot = shot(None);
     variable_break_shot.power = 73.0;
     let opening_simulation = simulation(&opening, &["1"], &[], &[], &[]);
@@ -581,6 +588,21 @@ fn reducer_allows_variable_break_power_and_enforces_room_power_afterwards() {
         },
     )
     .expect("break power remains adjustable");
+
+    let mut unlocked_regular = opening.clone();
+    unlocked_regular.break_shot = false;
+    unlocked_regular.settings.fixed_shot_power_enabled = false;
+    let regular_simulation = simulation(&unlocked_regular, &["1"], &[], &["1"], &[]);
+    reduce_billiards_action(
+        &unlocked_regular,
+        SEAT_ONE,
+        &BilliardsAction::Shoot { shot: shot(None) },
+        ReducerContext {
+            simulation: Some(&regular_simulation),
+            deciding_black_chooser_index: 0,
+        },
+    )
+    .expect("disabled fixed-power mode keeps regular shots adjustable");
 
     let mut regular = opening;
     regular.break_shot = false;

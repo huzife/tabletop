@@ -63,27 +63,46 @@ export function BilliardsSettingsEditor({
       <fieldset className="billiards-settings__group" disabled={disabled}>
         <legend>出杆参数</legend>
         <div className="billiards-settings__physics">
-          <label className="billiards-settings__parameter">
-            <span>
-              <strong>固定出杆力度</strong>
-              <output>{value.fixedShotPower}%</output>
-            </span>
+          <label className="billiards-settings__toggle">
             <input
-              aria-label="固定出杆力度"
-              max={MAX_BILLIARDS_SHOT_POWER}
-              min={MIN_BILLIARDS_SHOT_POWER}
+              aria-label="启用固定出杆力度"
+              checked={value.fixedShotPowerEnabled}
               onChange={(event) =>
                 onChange({
                   ...value,
-                  fixedShotPower: event.currentTarget.valueAsNumber,
+                  fixedShotPowerEnabled: event.currentTarget.checked,
                 })
               }
-              step={1}
-              type="range"
-              value={value.fixedShotPower}
+              type="checkbox"
             />
-            <small>开球可自由控制力度，之后每杆固定使用此力度。</small>
+            <span>
+              <strong>固定出杆力度</strong>
+              <small>开启后，开球可自由控制力度，之后每杆使用预设力度。</small>
+            </span>
           </label>
+          {value.fixedShotPowerEnabled ? (
+            <label className="billiards-settings__parameter">
+              <span>
+                <strong>预设力度</strong>
+                <output>{value.fixedShotPower}%</output>
+              </span>
+              <input
+                aria-label="固定出杆力度"
+                max={MAX_BILLIARDS_SHOT_POWER}
+                min={MIN_BILLIARDS_SHOT_POWER}
+                onChange={(event) =>
+                  onChange({
+                    ...value,
+                    fixedShotPower: event.currentTarget.valueAsNumber,
+                  })
+                }
+                step={1}
+                type="range"
+                value={value.fixedShotPower}
+              />
+              <small>非开球阶段将锁定为此力度。</small>
+            </label>
+          ) : null}
         </div>
       </fieldset>
       <fieldset className="billiards-settings__group" disabled={disabled}>

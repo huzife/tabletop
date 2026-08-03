@@ -52,6 +52,7 @@ export const billiardsSettingsSchema = z.strictObject({
     .min(MIN_BILLIARDS_SHOT_POWER)
     .max(MAX_BILLIARDS_SHOT_POWER)
     .default(DEFAULT_FIXED_SHOT_POWER),
+  fixedShotPowerEnabled: z.boolean().default(false),
   mode: billiardsModeSchema,
 });
 export type BilliardsSettings = z.infer<typeof billiardsSettingsSchema>;
@@ -67,6 +68,7 @@ export const billiardsSettings = defineGameSettingsContractV1<BilliardsSettings>
     clothSlidingFriction: DEFAULT_CLOTH_SLIDING_FRICTION,
     cushionFriction: DEFAULT_CUSHION_FRICTION,
     fixedShotPower: DEFAULT_FIXED_SHOT_POWER,
+    fixedShotPowerEnabled: false,
     mode: "chinese-eight-ball",
   },
   schema: billiardsSettingsSchema,
@@ -75,10 +77,11 @@ export const billiardsSettings = defineGameSettingsContractV1<BilliardsSettings>
     clothSlidingFriction,
     cushionFriction,
     fixedShotPower,
+    fixedShotPowerEnabled,
     mode,
   }) => [
     { label: "模式", value: MODE_LABELS[mode] },
-    { label: "固定出杆力度", value: `${fixedShotPower}%` },
+    { label: "固定出杆力度", value: fixedShotPowerEnabled ? `${fixedShotPower}%` : "关闭" },
     { label: "滑动摩擦", value: clothSlidingFriction.toFixed(3) },
     { label: "滚动摩擦", value: clothRollingFriction.toFixed(3) },
     { label: "库边摩擦", value: cushionFriction.toFixed(3) },

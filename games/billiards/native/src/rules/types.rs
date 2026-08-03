@@ -128,6 +128,8 @@ pub struct BilliardsSettings {
     pub cushion_friction: f64,
     #[serde(default = "default_fixed_shot_power")]
     pub fixed_shot_power: f64,
+    #[serde(default)]
+    pub fixed_shot_power_enabled: bool,
     pub mode: BilliardsMode,
 }
 

@@ -51,7 +51,12 @@ describe("billiards solo practice view", () => {
   it("locks non-break shots to the room's fixed power", () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
     const dispatchAction = vi.fn();
-    const view = { ...practiceView(), breakShot: false, fixedShotPower: 137 };
+    const view = {
+      ...practiceView(),
+      breakShot: false,
+      fixedShotPower: 137,
+      fixedShotPowerEnabled: true,
+    };
 
     render(
       <BilliardsGameView
@@ -71,6 +76,34 @@ describe("billiards solo practice view", () => {
     expect(dispatchAction).toHaveBeenCalledWith(
       expect.objectContaining({
         shot: expect.objectContaining({ power: 137 }),
+        type: "billiards.shoot",
+      }),
+    );
+  });
+
+  it("keeps non-break power adjustable when fixed power is disabled", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const dispatchAction = vi.fn();
+    const view = { ...practiceView(), breakShot: false, fixedShotPowerEnabled: false };
+
+    render(
+      <BilliardsGameView
+        actionPending={false}
+        connectionState="connected"
+        dispatchAction={dispatchAction}
+        displayEvents={[]}
+        readOnly={false}
+        view={view}
+      />,
+    );
+
+    const power = screen.getByRole("slider", { name: "力度" });
+    expect(power).toBeEnabled();
+    fireEvent.change(power, { target: { value: "84" } });
+    fireEvent.click(screen.getByRole("button", { name: "出杆" }));
+    expect(dispatchAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shot: expect.objectContaining({ power: 84 }),
         type: "billiards.shoot",
       }),
     );

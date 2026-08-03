@@ -434,6 +434,7 @@ function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
     balls: [],
     breakShot: false,
     fixedShotPower: 100,
+    fixedShotPowerEnabled: false,
     lastShot: null,
     legalActions: {
       canChooseDecidingBlack: false,
