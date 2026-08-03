@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { roomIdSchema } from "@tabletop/protocol";
 import { useEffect, useRef, useState } from "react";
 import { Navigate, Outlet, useNavigate, useParams, type RouteObject } from "react-router";
+import { FilingFooter, hasFilingInformation } from "../filing/filing-footer";
 import { AuthProvider, RequireAdmin, RequireAnonymous, RequireSession } from "./auth";
 import { AppShell } from "./components/app-shell";
 import { ApiClientError } from "./api/client";
@@ -34,7 +35,10 @@ function RootProviders() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <Outlet />
+        <div className={hasFilingInformation ? "site-frame site-frame--with-filing" : "site-frame"}>
+          <Outlet />
+          <FilingFooter />
+        </div>
       </AuthProvider>
     </QueryClientProvider>
   );

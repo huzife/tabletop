@@ -13,6 +13,7 @@ test-results/
 !.env.example
 *.pem
 *.key
+apps/web/filing/filing.config.json
 
 # Runtime data
 *.db

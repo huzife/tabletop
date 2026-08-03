@@ -11,6 +11,7 @@ readonly CURRENT_LINK="/opt/tabletop/current"
 readonly HEALTH_URL="http://127.0.0.1:3000/health/ready"
 readonly RUSTUP_HOME_DIR="/opt/tabletop/toolchains/rustup"
 readonly RUSTUP_CARGO_HOME="/opt/tabletop/toolchains/cargo"
+readonly FILING_CONFIG_RELATIVE_PATH="apps/web/filing/filing.config.json"
 
 branch="master"
 revision=""
@@ -190,6 +191,11 @@ create_release() {
   [[ ! -e "$release_dir" ]] || die "release already exists: $release_dir"
   install -d -o root -g "$APP_GROUP" -m 0755 "$release_dir"
   git -C "$REPOSITORY_DIR" archive --format=tar "$target_commit" | tar -xf - -C "$release_dir"
+  if [[ -f "$REPOSITORY_DIR/$FILING_CONFIG_RELATIVE_PATH" ]]; then
+    install -D -m 0644 \
+      "$REPOSITORY_DIR/$FILING_CONFIG_RELATIVE_PATH" \
+      "$release_dir/$FILING_CONFIG_RELATIVE_PATH"
+  fi
   printf 'commit=%s\nbranch=%s\ncreated_at=%s\n' \
     "$target_commit" "$branch" "$timestamp" > "$release_dir/.tabletop-release"
   chown -R "$APP_USER:$APP_GROUP" "$release_dir"

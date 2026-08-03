@@ -32,6 +32,17 @@ body {
   min-width: 1180px;
 }
 
+.site-frame {
+  --filing-footer-height: 0px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.site-frame--with-filing {
+  --filing-footer-height: 49px;
+}
+
 button,
 input,
 select,
@@ -84,7 +95,10 @@ h3 {
 }
 
 .app-frame {
-  min-height: 100vh;
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  min-height: calc(100vh - var(--filing-footer-height));
 }
 
 .app-header {
@@ -191,7 +205,8 @@ h3 {
 }
 
 .app-main {
-  min-height: calc(100vh - 58px);
+  flex: 1 0 auto;
+  min-height: calc(100vh - 58px - var(--filing-footer-height));
 }
 
 .page {
@@ -212,7 +227,7 @@ h3 {
   align-items: center;
   display: flex;
   justify-content: center;
-  min-height: calc(100vh - 58px);
+  min-height: calc(100vh - 58px - var(--filing-footer-height));
 }
 
 .page-heading {
@@ -471,7 +486,7 @@ h3 {
   background-size: 32px 32px;
   display: flex;
   justify-content: center;
-  min-height: 100vh;
+  min-height: calc(100vh - var(--filing-footer-height));
   padding: 32px;
 }
 
@@ -685,7 +700,7 @@ h3 {
   background: var(--surface);
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 58px);
+  height: calc(100vh - 58px - var(--filing-footer-height));
   min-height: 662px;
 }
 
