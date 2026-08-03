@@ -1,12 +1,15 @@
 import { defineGameSettingsContractV1 } from "@tabletop/game-sdk";
 import { z } from "zod";
 
+import { MAX_BILLIARDS_SHOT_POWER, MIN_BILLIARDS_SHOT_POWER } from "./actions.js";
+
 export const billiardsModeSchema = z.enum(["chinese-eight-ball", "snooker"]);
 export type BilliardsMode = z.infer<typeof billiardsModeSchema>;
 
-export const DEFAULT_CLOTH_SLIDING_FRICTION = 0.08;
+export const DEFAULT_CLOTH_SLIDING_FRICTION = 0.15;
 export const DEFAULT_CLOTH_ROLLING_FRICTION = 0.01;
-export const DEFAULT_CUSHION_FRICTION = 0.08;
+export const DEFAULT_CUSHION_FRICTION = 0.15;
+export const DEFAULT_FIXED_SHOT_POWER = 100;
 export const CLOTH_SLIDING_FRICTION_RANGE = {
   max: 0.5,
   min: 0.04,
@@ -42,6 +45,13 @@ export const billiardsSettingsSchema = z.strictObject({
     .min(CUSHION_FRICTION_RANGE.min)
     .max(CUSHION_FRICTION_RANGE.max)
     .default(DEFAULT_CUSHION_FRICTION),
+  fixedShotPower: z
+    .number()
+    .finite()
+    .int()
+    .min(MIN_BILLIARDS_SHOT_POWER)
+    .max(MAX_BILLIARDS_SHOT_POWER)
+    .default(DEFAULT_FIXED_SHOT_POWER),
   mode: billiardsModeSchema,
 });
 export type BilliardsSettings = z.infer<typeof billiardsSettingsSchema>;
@@ -56,11 +66,19 @@ export const billiardsSettings = defineGameSettingsContractV1<BilliardsSettings>
     clothRollingFriction: DEFAULT_CLOTH_ROLLING_FRICTION,
     clothSlidingFriction: DEFAULT_CLOTH_SLIDING_FRICTION,
     cushionFriction: DEFAULT_CUSHION_FRICTION,
+    fixedShotPower: DEFAULT_FIXED_SHOT_POWER,
     mode: "chinese-eight-ball",
   },
   schema: billiardsSettingsSchema,
-  summarize: ({ clothRollingFriction, clothSlidingFriction, cushionFriction, mode }) => [
+  summarize: ({
+    clothRollingFriction,
+    clothSlidingFriction,
+    cushionFriction,
+    fixedShotPower,
+    mode,
+  }) => [
     { label: "模式", value: MODE_LABELS[mode] },
+    { label: "固定出杆力度", value: `${fixedShotPower}%` },
     { label: "滑动摩擦", value: clothSlidingFriction.toFixed(3) },
     { label: "滚动摩擦", value: clothRollingFriction.toFixed(3) },
     { label: "库边摩擦", value: cushionFriction.toFixed(3) },

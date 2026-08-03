@@ -367,7 +367,7 @@ describe("billiards opponent aim preview", () => {
       event: {
         angle: Math.PI / 3,
         elevation: 18,
-        power: 150,
+        power: 200,
         shotNumber: 4,
         tip: { x: 0.35, y: -0.2 },
         type: "billiards.aim-preview",
@@ -378,7 +378,7 @@ describe("billiards opponent aim preview", () => {
 
     expect(opponentAimPreview(view, transient)).toMatchObject({
       elevation: 18,
-      power: 150,
+      power: 200,
       tip: { x: 0.35, y: -0.2 },
     });
     expect(opponentAimPreview({ ...view, shotNumber: 5 }, transient)).toBeNull();
@@ -397,7 +397,14 @@ describe("billiards opponent aim preview", () => {
     expect(
       opponentAimPreview(view, {
         ...base,
-        event: { power: 200, type: "billiards.aim-preview" },
+        event: {
+          angle: 0,
+          elevation: 0,
+          power: 200.001,
+          shotNumber: 0,
+          tip: { x: 0, y: 0 },
+          type: "billiards.aim-preview",
+        },
       }),
     ).toBeNull();
     expect(
@@ -426,6 +433,7 @@ function viewFixture(overrides: Partial<BilliardsView> = {}): BilliardsView {
     ballInHandZone: null,
     balls: [],
     breakShot: false,
+    fixedShotPower: 100,
     lastShot: null,
     legalActions: {
       canChooseDecidingBlack: false,

@@ -16,6 +16,7 @@ const RULE_ERRORS: Readonly<Record<string, string>> = {
   CUE_OUTSIDE_D: "母球必须放在 D 区内",
   CUE_OUTSIDE_BEHIND_LINE: "母球必须放在发球线后",
   CUE_OVERLAPS_BALL: "母球不能与其他球重叠",
+  FIXED_SHOT_POWER_REQUIRED: "本杆必须使用房间预设力度",
   GROUP_CHOICE_NOT_AVAILABLE: "当前球组选项不可用",
   INVALID_SHOT: "击球参数无效",
   MATCH_ENDED: "本局已经结束",

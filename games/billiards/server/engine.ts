@@ -160,6 +160,9 @@ function transitionForShot(
   }
 
   const normalizedSettings = billiardsSettings.schema.parse(state.settings);
+  if (!state.breakShot && action.shot.power !== normalizedSettings.fixedShotPower) {
+    throw new GameRuleError("FIXED_SHOT_POWER_REQUIRED");
+  }
   const initialBalls = state.balls.map((ball) => ({ ...ball }));
   const simulation = simulateBilliardsShot({
     balls: initialBalls,
@@ -308,7 +311,8 @@ export function projectBilliardsView(
   state: Readonly<BilliardsMatchState>,
   viewer: ViewerV1,
 ): BilliardsView {
-  const table = getBilliardsTableSpec(state.settings.mode);
+  const normalizedSettings = billiardsSettings.schema.parse(state.settings);
+  const table = getBilliardsTableSpec(normalizedSettings.mode);
   const viewerSeatId = viewer.kind === "player" ? viewer.seatId : null;
   const viewerIsPlayer = viewer.kind === "player" && state.seatIds.includes(viewer.seatId);
   const viewerIsCurrent =
@@ -320,6 +324,7 @@ export function projectBilliardsView(
     ballInHandZone: state.ballInHandZone,
     balls: state.balls.map((ball) => ({ ...ball })),
     breakShot: state.breakShot,
+    fixedShotPower: normalizedSettings.fixedShotPower,
     legalActions: {
       canChooseDecidingBlack:
         viewerIsCurrent &&
@@ -345,7 +350,7 @@ export function projectBilliardsView(
           seatId: state.lastShot.seatId,
         }
       : null,
-    mode: state.settings.mode,
+    mode: normalizedSettings.mode,
     outcome: state.outcome,
     pendingDecision: state.pendingDecision
       ? state.pendingDecision.type === "break-choice"

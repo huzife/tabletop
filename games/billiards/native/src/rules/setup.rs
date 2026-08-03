@@ -4,6 +4,7 @@ use super::types::{
     BilliardsPhase, BilliardsPlayerState, BilliardsSettings, EightBallGroup, SeatId, SnookerOn,
 };
 use crate::geometry::table_spec;
+use crate::model::{MAX_SHOT_POWER, MIN_SHOT_POWER};
 
 const SQRT_THREE_OVER_TWO: f64 = 0.866_025_403_784_438_6;
 const SNOOKER_PINK_RED_GAP: f64 = 0.0005;
@@ -177,6 +178,15 @@ pub fn create_initial_billiards_state(
     settings: BilliardsSettings,
     mut seat_ids: Vec<SeatId>,
 ) -> RuleResult<BilliardsMatchState> {
+    if !settings.fixed_shot_power.is_finite()
+        || settings.fixed_shot_power.fract() != 0.0
+        || !(MIN_SHOT_POWER..=MAX_SHOT_POWER).contains(&settings.fixed_shot_power)
+    {
+        return Err(RuleError::invalid(
+            "INVALID_FIXED_SHOT_POWER",
+            "Fixed shot power is outside the supported input range",
+        ));
+    }
     if seat_ids.is_empty()
         || seat_ids.len() > 2
         || seat_ids.iter().any(String::is_empty)

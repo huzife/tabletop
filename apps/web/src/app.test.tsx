@@ -111,12 +111,15 @@ describe("web routes", () => {
     const slidingFriction = screen.getByRole("slider", { name: "滑动摩擦" });
     const rollingFriction = screen.getByRole("slider", { name: "滚动摩擦" });
     const cushionFriction = screen.getByRole("slider", { name: "库边摩擦" });
+    const fixedShotPower = screen.getByRole("slider", { name: "固定出杆力度" });
     expect(slidingFriction).toBeEnabled();
     expect(rollingFriction).toBeEnabled();
     expect(cushionFriction).toBeEnabled();
+    expect(fixedShotPower).toBeEnabled();
     fireEvent.change(slidingFriction, { target: { value: "0.12" } });
     fireEvent.change(rollingFriction, { target: { value: "0.015" } });
     fireEvent.change(cushionFriction, { target: { value: "0.3" } });
+    fireEvent.change(fixedShotPower, { target: { value: "137" } });
     fireEvent.click(screen.getByRole("button", { name: "创建并进入" }));
 
     await waitFor(() => expect(createRoomBody).toBeDefined());
@@ -127,6 +130,7 @@ describe("web routes", () => {
         clothRollingFriction: 0.015,
         clothSlidingFriction: 0.12,
         cushionFriction: 0.3,
+        fixedShotPower: 137,
         mode: "snooker",
       },
     });

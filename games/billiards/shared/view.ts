@@ -6,6 +6,8 @@ import {
   billiardsDecidingBlackChoiceSchema,
   billiardsSelectableGroupSchema,
   billiardsShotSchema,
+  MAX_BILLIARDS_SHOT_POWER,
+  MIN_BILLIARDS_SHOT_POWER,
   snookerColorSchema,
 } from "./actions.js";
 import {
@@ -16,6 +18,7 @@ import {
   DEFAULT_CLOTH_ROLLING_FRICTION,
   DEFAULT_CLOTH_SLIDING_FRICTION,
   DEFAULT_CUSHION_FRICTION,
+  DEFAULT_FIXED_SHOT_POWER,
 } from "./settings.js";
 
 export const billiardsBallKindSchema = z.enum([
@@ -191,6 +194,13 @@ export const billiardsViewSchema = z.strictObject({
   ballInHandZone: z.enum(["anywhere", "behind-line", "d"]).nullable(),
   balls: z.array(billiardsBallSchema).min(16).max(22),
   breakShot: z.boolean(),
+  fixedShotPower: z
+    .number()
+    .finite()
+    .int()
+    .min(MIN_BILLIARDS_SHOT_POWER)
+    .max(MAX_BILLIARDS_SHOT_POWER)
+    .default(DEFAULT_FIXED_SHOT_POWER),
   legalActions: z.strictObject({
     canChooseDecidingBlack: z.boolean(),
     canChooseGroup: z.boolean(),

@@ -1,12 +1,13 @@
 use crate::math::Vec3;
 use serde::{Deserialize, Serialize};
 
-pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v9";
+pub const PHYSICS_VERSION: &str = "tabletop-billiards-scene-v10";
 pub const MIN_SHOT_POWER: f64 = 1.0;
-pub const MAX_SHOT_POWER: f64 = 150.0;
-pub const DEFAULT_CLOTH_SLIDING_FRICTION: f64 = 0.08;
+pub const MAX_SHOT_POWER: f64 = 200.0;
+pub const DEFAULT_CLOTH_SLIDING_FRICTION: f64 = 0.15;
 pub const DEFAULT_CLOTH_ROLLING_FRICTION: f64 = 0.01;
-pub const DEFAULT_CUSHION_FRICTION: f64 = 0.08;
+pub const DEFAULT_CUSHION_FRICTION: f64 = 0.15;
+pub const DEFAULT_FIXED_SHOT_POWER: f64 = 100.0;
 pub const MIN_CLOTH_SLIDING_FRICTION: f64 = 0.04;
 pub const MAX_CLOTH_SLIDING_FRICTION: f64 = 0.5;
 pub const MIN_CLOTH_ROLLING_FRICTION: f64 = 0.003;
@@ -24,6 +25,10 @@ pub const fn default_cloth_rolling_friction() -> f64 {
 
 pub const fn default_cushion_friction() -> f64 {
     DEFAULT_CUSHION_FRICTION
+}
+
+pub const fn default_fixed_shot_power() -> f64 {
+    DEFAULT_FIXED_SHOT_POWER
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

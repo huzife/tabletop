@@ -10,6 +10,7 @@ fn settings(mode: BilliardsMode) -> BilliardsSettings {
         cloth_rolling_friction: crate::model::DEFAULT_CLOTH_ROLLING_FRICTION,
         cloth_sliding_friction: crate::model::DEFAULT_CLOTH_SLIDING_FRICTION,
         cushion_friction: crate::model::DEFAULT_CUSHION_FRICTION,
+        fixed_shot_power: crate::model::DEFAULT_FIXED_SHOT_POWER,
         mode,
     }
 }
@@ -130,10 +131,15 @@ fn serde_models_match_the_existing_wire_contract() {
     assert_eq!(decoded, action);
 
     let match_state = state(BilliardsMode::ChineseEightBall);
-    let value = serde_json::to_value(&match_state).expect("serialize state");
+    let mut value = serde_json::to_value(&match_state).expect("serialize state");
     assert_eq!(value["ballInHandZone"], "behind-line");
     assert_eq!(value["phase"], "ball_in_hand");
     assert_eq!(value["settings"]["mode"], "chinese-eight-ball");
+    assert_eq!(value["settings"]["fixedShotPower"], 100.0);
+    value["settings"]
+        .as_object_mut()
+        .expect("settings object")
+        .remove("fixedShotPower");
     let decoded: BilliardsMatchState = serde_json::from_value(value).expect("deserialize state");
     assert_eq!(decoded, match_state);
 }
@@ -212,6 +218,17 @@ fn initial_state_rejects_invalid_seats_with_a_stable_error() {
         .expect_err("empty seats must fail");
     assert_eq!(error.kind, RuleErrorKind::InvalidInput);
     assert_eq!(error.code, "INVALID_SEAT_CONFIGURATION");
+}
+
+#[test]
+fn initial_state_rejects_fractional_fixed_power() {
+    let mut invalid = settings(BilliardsMode::ChineseEightBall);
+    invalid.fixed_shot_power = 100.5;
+    let error =
+        create_initial_billiards_state(invalid, vec![SEAT_ONE.to_owned(), SEAT_TWO.to_owned()])
+            .expect_err("fractional fixed power must fail");
+    assert_eq!(error.kind, RuleErrorKind::InvalidInput);
+    assert_eq!(error.code, "INVALID_FIXED_SHOT_POWER");
 }
 
 #[test]
@@ -544,4 +561,53 @@ fn reducer_requires_simulation_and_applies_place_and_shoot() {
     )
     .expect("reduce shot");
     assert_eq!(shot_result.state.shot_number, 1);
+}
+
+#[test]
+fn reducer_allows_variable_break_power_and_enforces_room_power_afterwards() {
+    let opening = ready_to_shoot(state(BilliardsMode::ChineseEightBall));
+    let mut variable_break_shot = shot(None);
+    variable_break_shot.power = 73.0;
+    let opening_simulation = simulation(&opening, &["1"], &[], &[], &[]);
+    reduce_billiards_action(
+        &opening,
+        SEAT_ONE,
+        &BilliardsAction::Shoot {
+            shot: variable_break_shot,
+        },
+        ReducerContext {
+            simulation: Some(&opening_simulation),
+            deciding_black_chooser_index: 0,
+        },
+    )
+    .expect("break power remains adjustable");
+
+    let mut regular = opening;
+    regular.break_shot = false;
+    let regular_simulation = simulation(&regular, &["1"], &[], &["1"], &[]);
+    let error = reduce_billiards_action(
+        &regular,
+        SEAT_ONE,
+        &BilliardsAction::Shoot { shot: shot(None) },
+        ReducerContext {
+            simulation: Some(&regular_simulation),
+            deciding_black_chooser_index: 0,
+        },
+    )
+    .expect_err("non-break power must match the room setting");
+    assert_eq!(error.kind, RuleErrorKind::Rule);
+    assert_eq!(error.code, "FIXED_SHOT_POWER_REQUIRED");
+
+    let mut fixed_shot = shot(None);
+    fixed_shot.power = regular.settings.fixed_shot_power;
+    reduce_billiards_action(
+        &regular,
+        SEAT_ONE,
+        &BilliardsAction::Shoot { shot: fixed_shot },
+        ReducerContext {
+            simulation: Some(&regular_simulation),
+            deciding_black_chooser_index: 0,
+        },
+    )
+    .expect("configured non-break power is accepted");
 }

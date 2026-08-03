@@ -44,8 +44,36 @@ describe("billiards solo practice view", () => {
     expect(screen.getByText("位置 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "出杆" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "认输" })).toBeEnabled();
-    expect(screen.getByRole("slider", { name: "力度" })).toHaveAttribute("max", "150");
+    expect(screen.getByRole("slider", { name: "力度" })).toHaveAttribute("max", "200");
     expect(screen.queryByText("目标彩球")).not.toBeInTheDocument();
+  });
+
+  it("locks non-break shots to the room's fixed power", () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const dispatchAction = vi.fn();
+    const view = { ...practiceView(), breakShot: false, fixedShotPower: 137 };
+
+    render(
+      <BilliardsGameView
+        actionPending={false}
+        connectionState="connected"
+        dispatchAction={dispatchAction}
+        displayEvents={[]}
+        readOnly={false}
+        view={view}
+      />,
+    );
+
+    const power = screen.getByRole("slider", { name: "力度（房间预设）" });
+    expect(power).toBeDisabled();
+    expect(power).toHaveValue("137");
+    fireEvent.click(screen.getByRole("button", { name: "出杆" }));
+    expect(dispatchAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shot: expect.objectContaining({ power: 137 }),
+        type: "billiards.shoot",
+      }),
+    );
   });
 
   it("shows the opponent's live direction, cue tip, power and elevation", () => {

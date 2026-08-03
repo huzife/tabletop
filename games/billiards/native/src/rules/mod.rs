@@ -6,7 +6,7 @@
 //! respotted-black procedure needs a toss, the caller supplies the selected
 //! seat index through [`ReducerContext`].
 
-pub const RULES_VERSION: &str = "tabletop-billiards-rules-v3";
+pub const RULES_VERSION: &str = "tabletop-billiards-rules-v4";
 
 mod common;
 mod eight_ball;

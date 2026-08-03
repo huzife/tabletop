@@ -1,5 +1,6 @@
 use crate::model::{
     default_cloth_rolling_friction, default_cloth_sliding_friction, default_cushion_friction,
+    default_fixed_shot_power,
 };
 use serde::{Deserialize, Serialize};
 
@@ -125,6 +126,8 @@ pub struct BilliardsSettings {
     pub cloth_sliding_friction: f64,
     #[serde(default = "default_cushion_friction")]
     pub cushion_friction: f64,
+    #[serde(default = "default_fixed_shot_power")]
+    pub fixed_shot_power: f64,
     pub mode: BilliardsMode,
 }
 

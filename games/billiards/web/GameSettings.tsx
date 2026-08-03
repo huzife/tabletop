@@ -1,5 +1,6 @@
 import type { GameSettingsPropsV1 } from "@tabletop/game-sdk/web";
 
+import { MAX_BILLIARDS_SHOT_POWER, MIN_BILLIARDS_SHOT_POWER } from "../shared/actions.js";
 import {
   CLOTH_ROLLING_FRICTION_RANGE,
   CLOTH_SLIDING_FRICTION_RANGE,
@@ -57,6 +58,32 @@ export function BilliardsSettingsEditor({
               </span>
             </label>
           ))}
+        </div>
+      </fieldset>
+      <fieldset className="billiards-settings__group" disabled={disabled}>
+        <legend>出杆参数</legend>
+        <div className="billiards-settings__physics">
+          <label className="billiards-settings__parameter">
+            <span>
+              <strong>固定出杆力度</strong>
+              <output>{value.fixedShotPower}%</output>
+            </span>
+            <input
+              aria-label="固定出杆力度"
+              max={MAX_BILLIARDS_SHOT_POWER}
+              min={MIN_BILLIARDS_SHOT_POWER}
+              onChange={(event) =>
+                onChange({
+                  ...value,
+                  fixedShotPower: event.currentTarget.valueAsNumber,
+                })
+              }
+              step={1}
+              type="range"
+              value={value.fixedShotPower}
+            />
+            <small>开球可自由控制力度，之后每杆固定使用此力度。</small>
+          </label>
         </div>
       </fieldset>
       <fieldset className="billiards-settings__group" disabled={disabled}>

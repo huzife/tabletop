@@ -98,10 +98,10 @@ describe("Pooltool-compatible billiards core", () => {
     const result = simulateBilliardsShot({
       balls: [ball("cue", "cue", 0.55, centreY)],
       mode,
-      shot: shot({ power: 150 }),
+      shot: shot({ power: 200 }),
     });
 
-    expect(result.cueStrike.cueSpeed).toBe(6);
+    expect(result.cueStrike.cueSpeed).toBe(8);
   });
 
   it("is deterministic and resolves a single event at a time", () => {
@@ -115,7 +115,7 @@ describe("Pooltool-compatible billiards core", () => {
     const second = simulateBilliardsShot(input);
 
     expect(first).toEqual(second);
-    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v9");
+    expect(first.physicsVersion).toBe("tabletop-billiards-scene-v10");
     expect(first.stateHash).toMatch(/^[a-f0-9]{32}$/);
     expect(first.firstContactBallIds).toEqual(["one"]);
     expect(
@@ -158,7 +158,7 @@ describe("Pooltool-compatible billiards core", () => {
       balls,
       captureFrames: true,
       clothRollingFriction: 0.01,
-      clothSlidingFriction: 0.08,
+      clothSlidingFriction: 0.15,
       mode,
       shot: backspinShot,
     });
@@ -191,7 +191,7 @@ describe("Pooltool-compatible billiards core", () => {
       balls,
       captureFrames: true,
       clothRollingFriction: 0.01,
-      clothSlidingFriction: 0.08,
+      clothSlidingFriction: 0.15,
       mode: "snooker",
       shot: backspinShot,
     });
@@ -224,7 +224,7 @@ describe("Pooltool-compatible billiards core", () => {
         shot: shot({ angle: 0.35, power: 40, tip: { x: 0.45, y: 0 } }),
       };
       const implicitDefault = simulateBilliardsShot(input);
-      const explicitDefault = simulateBilliardsShot({ ...input, cushionFriction: 0.08 });
+      const explicitDefault = simulateBilliardsShot({ ...input, cushionFriction: 0.15 });
       const highFriction = simulateBilliardsShot({ ...input, cushionFriction: 0.5 });
 
       expect(implicitDefault).toEqual(explicitDefault);
@@ -431,7 +431,7 @@ describe("Pooltool-compatible billiards core", () => {
     expect(first.checksum).toBe(simulation.checksum);
     expect(first.stateHash).toBe(simulation.stateHash);
     expect(first.physicsVersion).toBe(coreInfo.physicsVersion);
-    expect(coreInfo.rulesVersion).toBe("tabletop-billiards-rules-v3");
+    expect(coreInfo.rulesVersion).toBe("tabletop-billiards-rules-v4");
     expect(first.paths.map(({ id }) => id)).toEqual(["cue", "one"]);
     expect(first.paths.every(({ points }) => points.length >= 2 && points.length <= 7)).toBe(true);
     expect(first.paths.every(({ points }) => points[0]?.atMs === 0)).toBe(true);

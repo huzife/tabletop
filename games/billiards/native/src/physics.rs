@@ -2040,7 +2040,12 @@ mod tests {
 
     #[test]
     fn arbitrary_slide_evolution_matches_pinned_pooltool_oracle() {
-        let params = ball_parameters(BilliardsMode::ChineseEightBall);
+        let params = ball_parameters_with_friction(
+            BilliardsMode::ChineseEightBall,
+            0.08,
+            DEFAULT_CLOTH_ROLLING_FRICTION,
+            DEFAULT_CUSHION_FRICTION,
+        );
         let table = TableGeometry::for_mode(BilliardsMode::ChineseEightBall);
         let (mut balls, _) = dynamic_balls(
             &[ball("cue", BallKind::Cue, 0.4, 0.5)],
@@ -2105,7 +2110,12 @@ mod tests {
 
     #[test]
     fn event_time_matches_pinned_pooltool_quartic_oracle() {
-        let params = ball_parameters(BilliardsMode::ChineseEightBall);
+        let params = ball_parameters_with_friction(
+            BilliardsMode::ChineseEightBall,
+            0.08,
+            DEFAULT_CLOTH_ROLLING_FRICTION,
+            DEFAULT_CUSHION_FRICTION,
+        );
         let table = TableGeometry::for_mode(BilliardsMode::ChineseEightBall);
         let source = [
             ball("one", BallKind::Solid, 0.5, 0.5),

@@ -148,6 +148,12 @@ pub fn reduce_billiards_action(
                     "A color must be nominated when color is on",
                 ));
             }
+            if !state.break_shot && shot.power != state.settings.fixed_shot_power {
+                return Err(RuleError::rule(
+                    "FIXED_SHOT_POWER_REQUIRED",
+                    "Non-break shots must use the room's fixed shot power",
+                ));
+            }
             let simulation = context.simulation.ok_or_else(|| {
                 RuleError::invalid(
                     "SIMULATION_RESULT_REQUIRED",
